@@ -1,44 +1,85 @@
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::time::Instant;
 
+use regex::Regex;
 use rust_stemmers::{Algorithm, Stemmer};
 use stop_words;
 
-// Document represents an article with its processed content
 struct Document {
     id: String,
     title: String,
-    path: PathBuf,
     term_freq: HashMap<String, usize>,
 }
 
-// Our recommendation system
 struct RecommenderSystem {
     documents: Vec<Document>,
     stemmer: Stemmer,
     stop_words: HashSet<String>,
-    idf_scores: HashMap<String, f64>, // Inverse document frequency scores
+    idf_scores: HashMap<String, f64>,
+    // Regex patterns for filtering irrelevant content
+    url_pattern: Regex,
+    crypto_address_pattern: Regex,
+    twitter_handle_pattern: Regex,
+    markdown_pattern: Regex,
+    file_path_pattern: Regex,
 }
 
 impl RecommenderSystem {
     fn new() -> Self {
-        // Initialize with English stemmer and stopwords
+        // Initialize stemmer and stopwords
         let stemmer = Stemmer::create(Algorithm::English);
         let stop_words_vec = stop_words::get(stop_words::LANGUAGE::English);
-        let stop_words = stop_words_vec.into_iter().collect();
+
+        // Additional domain-specific stopwords as Rekt News articles covers similar topics.
+        let mut all_stop_words = stop_words_vec;
+        all_stop_words.extend(vec![
+            "eth".to_string(),
+            "btc".to_string(),
+            "defi".to_string(),
+            "crypto".to_string(),
+            "rekt".to_string(),
+            "blockchain".to_string(),
+            "token".to_string(),
+            "tokens".to_string(),
+            "https".to_string(),
+            "http".to_string(),
+            "com".to_string(),
+            "www".to_string(),
+            "twitter".to_string(),
+            "tweet".to_string(),
+            "status".to_string(),
+        ]);
+
+        let stop_words = all_stop_words.into_iter().collect();
+
+        // Compile regex patterns
+        let url_pattern = Regex::new(r"https?://\S+|www\.\S+").unwrap();
+        let crypto_address_pattern =
+            Regex::new(r"0x[a-fA-F0-9]{40}|[13][a-km-zA-HJ-NP-Z1-9]{25,34}").unwrap();
+        let twitter_handle_pattern = Regex::new(r"@\w+").unwrap();
+        let markdown_pattern = Regex::new(r"!\[.*?\]\(.*?\)|[*_#>`{}]|\[.*?\]\(.*?\)").unwrap();
+        let file_path_pattern = Regex::new(r"(?i)\.(?:png|jpg|jpeg|gif|md|svg|pdf)").unwrap();
 
         RecommenderSystem {
             documents: Vec::new(),
             stemmer,
             stop_words,
             idf_scores: HashMap::new(),
+            url_pattern,
+            crypto_address_pattern,
+            twitter_handle_pattern,
+            markdown_pattern,
+            file_path_pattern,
         }
     }
 
     // Load and process all markdown files from a directory
     fn load_documents(&mut self, directory: &Path) -> Result<(), Box<dyn Error>> {
+        let start_time = Instant::now();
+
         for entry in fs::read_dir(directory)? {
             let entry = entry?;
             let path = entry.path();
@@ -56,34 +97,108 @@ impl RecommenderSystem {
                 self.documents.push(Document {
                     id: file_name,
                     title,
-                    path,
                     term_freq,
                 });
             }
         }
 
-        // Calculate IDF scores after loading all documents
+        // Calculate IDF scores
         self.calculate_idf_scores();
 
-        println!("Loaded {} documents", self.documents.len());
+        let duration = start_time.elapsed();
+        println!(
+            "Loaded and processed {} documents in {:.2?}",
+            self.documents.len(),
+            duration
+        );
         Ok(())
+    }
+
+    // Clean text by removing irrelevant elements
+    fn clean_text(&self, text: &str) -> String {
+        // Extract markdown content only
+        let content = if text.starts_with("---") {
+            if let Some(end_index) = text[3..].find("---") {
+                &text[(end_index + 6)..]
+            } else {
+                text
+            }
+        } else {
+            text
+        };
+
+        // Remove URLs with
+        let text = self.url_pattern.replace_all(content, " ");
+
+        // Remove crypto addresses
+        let text = self.crypto_address_pattern.replace_all(&text, " ");
+
+        // Remove Twitter handles
+        let text = self.twitter_handle_pattern.replace_all(&text, " ");
+
+        // Remove markdown formatting
+        let text = self.markdown_pattern.replace_all(&text, " ");
+
+        // Remove file paths/references
+        let text = self.file_path_pattern.replace_all(&text, " ");
+
+        // Remove special characters
+        let mut result = String::with_capacity(text.len());
+        for c in text.chars() {
+            match c {
+                '|' | '#' | '*' | '_' | '>' | '-' | '"' | '\'' | ':' | ';' | '…' | '(' | ')'
+                | '[' | ']' | '{' | '}' | '/' | '\\' => {
+                    result.push(' ');
+                }
+                _ => {
+                    result.push(c);
+                }
+            }
+        }
+
+        // Remove extra whitespace
+        let text = result.split_whitespace().collect::<Vec<&str>>().join(" ");
+
+        text
+    }
+
+    // Filter out numeric strings and very short terms
+    fn is_valid_term(&self, term: &str) -> bool {
+        if term.len() <= 2 {
+            return false;
+        }
+
+        // Skip purely numeric terms
+        if term.chars().all(|c| c.is_digit(10)) {
+            return false;
+        }
+
+        // Skip terms that are mostly numbers
+        let digit_count = term.chars().filter(|c| c.is_digit(10)).count();
+        if digit_count > term.len() / 2 {
+            return false;
+        }
+
+        true
     }
 
     // Process text: tokenize, remove stop words, stem, and count frequencies
     fn process_text(&self, text: &str) -> HashMap<String, usize> {
-        let text = text.to_lowercase();
+        // Clean the text
+        let cleaned_text = self.clean_text(text);
+        let lower_text = cleaned_text.to_lowercase();
 
-        // Simple tokenization by splitting on whitespace and punctuation
-        let words: Vec<String> = text
+        // Simple tokenization
+        let words: Vec<String> = lower_text
             .split(|c: char| !c.is_alphanumeric())
             .filter(|s| !s.is_empty())
             .map(|s| s.to_string())
             .collect();
 
-        // Remove stop words and apply stemming
+        // Remove stop words, apply stemming, and filter out invalid terms
         let processed_words: Vec<String> = words
             .into_iter()
-            .filter(|word| !self.stop_words.contains(word))
+            .filter(|word| !self.stop_words.contains(word) && self.is_valid_term(word))
             .map(|word| self.stemmer.stem(&word).to_string())
             .collect();
 
@@ -123,16 +238,10 @@ impl RecommenderSystem {
             return 0.0;
         }
 
-        // Total word count in this document
         let total_words: usize = doc.term_freq.values().sum();
-
-        // Term frequency
         let tf = term_count as f64 / total_words as f64;
-
-        // IDF score
         let idf = self.idf_scores.get(term).unwrap_or(&0.0);
 
-        // TF-IDF
         tf * idf
     }
 
@@ -212,8 +321,6 @@ impl RecommenderSystem {
     fn print_document_details(&self, doc_id: &str) {
         if let Some(doc) = self.documents.iter().find(|d| d.id == doc_id) {
             println!("Document: {}", doc.title);
-            println!("Path: {}", doc.path.display());
-            println!("Top 10 terms:");
 
             // Get the top 10 most frequent terms
             let mut terms: Vec<(&String, &usize)> = doc.term_freq.iter().collect();
@@ -238,7 +345,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     recommender.load_documents(articles_path)?;
 
     // Example usage: Get recommendations for a specific article
-    let example_article = "wormhole-rekt"; // Change this to any article ID
+    let example_article = "airdrop-hunters";
 
     println!("Details for '{}':", example_article);
     recommender.print_document_details(example_article);
