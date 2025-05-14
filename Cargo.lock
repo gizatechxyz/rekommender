@@ -429,6 +429,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "itertools"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba291022dbbd398a455acf126c1e341954079855bc60dfdda641363bd6922569"
+dependencies = [
+ "either",
+]
+
+[[package]]
 name = "itoa"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -511,7 +520,7 @@ dependencies = [
  "egg",
  "generational-box",
  "half",
- "itertools",
+ "itertools 0.11.0",
  "num-traits",
  "petgraph",
  "rand",
@@ -525,6 +534,27 @@ dependencies = [
  "urlencoding",
  "uuid",
  "webbrowser",
+]
+
+[[package]]
+name = "luminal_cpu"
+version = "0.1.0"
+source = "git+https://github.com/raphaelDkhn/luminal.git?rev=80ae0fd#80ae0fd082f1663c1bde6dcc6950342263516d30"
+dependencies = [
+ "itertools 0.12.1",
+ "luminal",
+ "matrixmultiply",
+ "rustc-hash",
+]
+
+[[package]]
+name = "matrixmultiply"
+version = "0.3.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a06de3016e9fae57a36fd14dba131fccf49f74b40b7fbdb472f96e361ec71a08"
+dependencies = [
+ "autocfg",
+ "rawpointer",
 ]
 
 [[package]]
@@ -691,6 +721,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "rawpointer"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "60a357793950651c4ed0f3f52338f53b2f809f32d83a07f72909fa13e4c6c1e3"
+
+[[package]]
 name = "rayon"
 version = "1.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -715,6 +751,7 @@ name = "recommendAIR"
 version = "0.1.0"
 dependencies = [
  "luminal",
+ "luminal_cpu",
  "rayon",
  "regex",
  "rust-stemmers",

@@ -4,7 +4,8 @@ use std::fs;
 use std::path::Path;
 use std::time::Instant;
 
-use rayon::prelude::*;
+use luminal::prelude::*;
+use luminal_cpu::CPUCompiler;
 use regex::Regex;
 use rust_stemmers::{Algorithm, Stemmer};
 use stop_words;
@@ -162,50 +163,77 @@ impl RecommenderSystem {
 
     // Compute document magnitudes once and store them
     fn calculate_similarity_matrix(&mut self) {
+        let start_time = Instant::now();
         let total_docs = self.documents.len();
 
-        // Initialize the matrix with zeros
-        self.similarity_matrix = vec![vec![0.0; total_docs]; total_docs];
+        // Initialize a new Luminal graph
+        let mut graph = Graph::new();
 
-        // Pre-compute magnitudes for all documents
-        let magnitudes: Vec<f32> = self
+        // Convert TF-IDF matrix to Vec for Luminal
+        let tfidf_data: Vec<f32> = self
             .tfidf_matrix
             .iter()
-            .map(|vec| vec.iter().map(|x| x * x).sum::<f32>().sqrt())
+            .flat_map(|row| row.iter().map(|&val| val))
             .collect();
 
-        // Vector of indices to parallelize over
-        let indices: Vec<(usize, usize)> = (0..total_docs)
-            .flat_map(|i| (i..total_docs).map(move |j| (i, j)))
-            .collect();
+        let total_terms = self.term_set.len();
 
-        // Compute similarities in parallel and collect the results
-        let similarities: Vec<(usize, usize, f32)> = indices
-            .par_iter() // Parallel iterator
-            .map(|&(i, j)| {
-                let dot_product = self.tfidf_matrix[i]
-                    .iter()
-                    .zip(&self.tfidf_matrix[j])
-                    .map(|(a, b)| a * b)
-                    .sum::<f32>();
+        // Create a tensor for the TF-IDF matrix
+        let tfidf_tensor = graph
+            .tensor((total_docs, total_terms))
+            .set(self.tfidf_matrix.iter().flat_map(tfidf_data));
 
-                let similarity = if magnitudes[i] > 0.0 && magnitudes[j] > 0.0 {
-                    dot_product / (magnitudes[i] * magnitudes[j])
-                } else {
-                    0.0
-                };
+        // The standard cosine similarity formula:
+        // cos(A,B) = (A·B) / (||A|| * ||B||)
 
-                (i, j, similarity)
-            })
-            .collect();
+        // Calculate document magnitudes (L2 norms)
+        // Square each element in the TF-IDF matrix
+        let squared = tfidf_tensor.clone() * tfidf_tensor.clone();
 
-        // Fill the similarity matrix with the computed values
-        for (i, j, similarity) in similarities {
-            self.similarity_matrix[i][j] = similarity;
-            if i != j {
-                self.similarity_matrix[j][i] = similarity; // Mirror for symmetry
+        // Sum along the terms dimension (axis 1)
+        let sum_squared = squared.sum_reduce(1);
+
+        // Take square root to get the magnitude
+        let magnitudes = sum_squared.sqrt();
+
+        // Compute all pairwise dot products using matrix multiplication
+        // This is equivalent to TF-IDF_matrix × TF-IDF_matrix^T
+        let dot_products = tfidf_tensor.matmul(tfidf_tensor.permute((1, 0)));
+
+        // Prepare magnitudes for division
+        // We need the product of magnitudes for each document pair
+        let mag_outer_product =
+            magnitudes.expand(1, total_docs) * magnitudes.permute(0).expand(0, total_docs);
+
+        // Calculate cosine similarities by dividing dot products by magnitude products
+        let similarities = dot_products / mag_outer_product;
+
+        // Mark the similarities tensor to be retrieved after graph execution
+        let mut result = similarities.retrieve();
+
+        // Compile the graph with CPU compiler
+        graph.compile(<(GenericCompiler,)>::default(), &mut result);
+
+        graph.display();
+        // Execute the graph
+        graph.execute_debug();
+
+        // Get the results
+        let similarity_data = result.data();
+
+        // Convert results to the similarity matrix format
+        self.similarity_matrix = vec![vec![0.0; total_docs]; total_docs];
+        for i in 0..total_docs {
+            for j in 0..total_docs {
+                self.similarity_matrix[i][j] = similarity_data[i * total_docs + j];
             }
         }
+
+        let duration = start_time.elapsed();
+        println!(
+            "Similarity matrix calculated using Luminal in {:.2?}",
+            duration
+        );
     }
 
     // Clean text by removing irrelevant elements
