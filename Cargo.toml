@@ -1,0 +1,11 @@
+[package]
+name = "recommendAIR"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+luminal = { git = "https://github.com/raphaelDkhn/luminal.git", rev = "80ae0fd" }
+rayon = "1.10.0"
+rust-stemmers = "1.2.0"
+rust-tfidf = "1.1.1"
+stop-words = "0.8.1"
