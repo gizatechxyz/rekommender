@@ -4,6 +4,7 @@ use std::fs;
 use std::path::Path;
 use std::time::Instant;
 
+use rayon::prelude::*;
 use regex::Regex;
 use rust_stemmers::{Algorithm, Stemmer};
 use stop_words;
@@ -25,6 +26,10 @@ struct RecommenderSystem {
     twitter_handle_pattern: Regex,
     markdown_pattern: Regex,
     file_path_pattern: Regex,
+    // Pre-computed data
+    term_set: Vec<String>,            // All unique terms across all documents
+    tfidf_matrix: Vec<Vec<f64>>,      // TF-IDF vectors for all documents
+    similarity_matrix: Vec<Vec<f64>>, // Cosine similarity matrix
 }
 
 impl RecommenderSystem {
@@ -73,6 +78,9 @@ impl RecommenderSystem {
             twitter_handle_pattern,
             markdown_pattern,
             file_path_pattern,
+            term_set: Vec::new(),
+            tfidf_matrix: Vec::new(),
+            similarity_matrix: Vec::new(),
         }
     }
 
@@ -105,6 +113,15 @@ impl RecommenderSystem {
         // Calculate IDF scores
         self.calculate_idf_scores();
 
+        // Create the term set with all unique terms
+        self.build_term_set();
+
+        // Calculate TF-IDF matrix
+        self.calculate_tfidf_matrix();
+
+        // Calculate similarity matrix
+        self.calculate_similarity_matrix();
+
         let duration = start_time.elapsed();
         println!(
             "Loaded and processed {} documents in {:.2?}",
@@ -112,6 +129,83 @@ impl RecommenderSystem {
             duration
         );
         Ok(())
+    }
+
+    // Create a set of all unique terms across all documents
+    fn build_term_set(&mut self) {
+        let mut all_terms = HashSet::new();
+
+        for doc in &self.documents {
+            for term in doc.term_freq.keys() {
+                all_terms.insert(term.clone());
+            }
+        }
+
+        self.term_set = all_terms.into_iter().collect();
+    }
+
+    // Calculate TF-IDF matrix for all documents
+    fn calculate_tfidf_matrix(&mut self) {
+        let total_docs = self.documents.len();
+        let total_terms = self.term_set.len();
+
+        // Initialize the matrix with zeros
+        self.tfidf_matrix = vec![vec![0.0; total_terms]; total_docs];
+
+        // Fill the matrix with TF-IDF values
+        for (doc_idx, doc) in self.documents.iter().enumerate() {
+            for (term_idx, term) in self.term_set.iter().enumerate() {
+                self.tfidf_matrix[doc_idx][term_idx] = self.calculate_tfidf(term, doc);
+            }
+        }
+    }
+
+    // Compute document magnitudes once and store them
+    fn calculate_similarity_matrix(&mut self) {
+        let total_docs = self.documents.len();
+
+        // Initialize the matrix with zeros
+        self.similarity_matrix = vec![vec![0.0; total_docs]; total_docs];
+
+        // Pre-compute magnitudes for all documents
+        let magnitudes: Vec<f64> = self
+            .tfidf_matrix
+            .iter()
+            .map(|vec| vec.iter().map(|x| x * x).sum::<f64>().sqrt())
+            .collect();
+
+        // Vector of indices to parallelize over
+        let indices: Vec<(usize, usize)> = (0..total_docs)
+            .flat_map(|i| (i..total_docs).map(move |j| (i, j)))
+            .collect();
+
+        // Compute similarities in parallel and collect the results
+        let similarities: Vec<(usize, usize, f64)> = indices
+            .par_iter() // Parallel iterator
+            .map(|&(i, j)| {
+                let dot_product = self.tfidf_matrix[i]
+                    .iter()
+                    .zip(&self.tfidf_matrix[j])
+                    .map(|(a, b)| a * b)
+                    .sum::<f64>();
+
+                let similarity = if magnitudes[i] > 0.0 && magnitudes[j] > 0.0 {
+                    dot_product / (magnitudes[i] * magnitudes[j])
+                } else {
+                    0.0
+                };
+
+                (i, j, similarity)
+            })
+            .collect();
+
+        // Fill the similarity matrix with the computed values
+        for (i, j, similarity) in similarities {
+            self.similarity_matrix[i][j] = similarity;
+            if i != j {
+                self.similarity_matrix[j][i] = similarity; // Mirror for symmetry
+            }
+        }
     }
 
     // Clean text by removing irrelevant elements
@@ -245,75 +339,33 @@ impl RecommenderSystem {
         tf * idf
     }
 
-    // Get recommendations for a document by ID
+    // Get recommendations for a document by ID using the pre-computed similarity matrix
     fn get_recommendations(&self, doc_id: &str, num_recommendations: usize) -> Vec<(String, f64)> {
         // Find the specified document
         let doc_idx = self.documents.iter().position(|d| d.id == doc_id);
 
         if let Some(idx) = doc_idx {
-            let target_doc = &self.documents[idx];
-
-            // Calculate similarity scores with all other documents
-            let mut similarities: Vec<(String, f64)> = self
-                .documents
+            // Get the similarities from the pre-computed matrix
+            let similarities: Vec<(usize, f64)> = self.similarity_matrix[idx]
                 .iter()
                 .enumerate()
-                .filter(|(i, _)| *i != idx) // Exclude the target document
-                .map(|(_, doc)| {
-                    // Calculate cosine similarity
-                    let score = self.calculate_similarity(target_doc, doc);
-                    (doc.id.clone(), score)
-                })
+                .filter(|(i, _)| *i != idx) // Filter out the document itself
+                .map(|(i, &score)| (i, score))
                 .collect();
 
             // Sort by similarity score (descending)
-            similarities.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+            let mut sorted_similarities = similarities;
+            sorted_similarities.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
 
             // Return top N recommendations
-            similarities.into_iter().take(num_recommendations).collect()
+            sorted_similarities
+                .into_iter()
+                .take(num_recommendations)
+                .map(|(doc_idx, score)| (self.documents[doc_idx].id.clone(), score))
+                .collect()
         } else {
             println!("Document with ID '{}' not found", doc_id);
             Vec::new()
-        }
-    }
-
-    // Calculate similarity between two documents using TF-IDF and cosine similarity
-    fn calculate_similarity(&self, doc1: &Document, doc2: &Document) -> f64 {
-        // Get unique terms from both documents
-        let mut all_terms: HashSet<String> = HashSet::new();
-
-        for term in doc1.term_freq.keys() {
-            all_terms.insert(term.clone());
-        }
-
-        for term in doc2.term_freq.keys() {
-            all_terms.insert(term.clone());
-        }
-
-        // Calculate TF-IDF vectors
-        let mut vec1: Vec<f64> = Vec::with_capacity(all_terms.len());
-        let mut vec2: Vec<f64> = Vec::with_capacity(all_terms.len());
-
-        for term in &all_terms {
-            vec1.push(self.calculate_tfidf(term, doc1));
-            vec2.push(self.calculate_tfidf(term, doc2));
-        }
-
-        // Calculate cosine similarity
-        self.cosine_similarity(&vec1, &vec2)
-    }
-
-    // Compute cosine similarity between two vectors
-    fn cosine_similarity(&self, vec1: &[f64], vec2: &[f64]) -> f64 {
-        let dot_product: f64 = vec1.iter().zip(vec2.iter()).map(|(a, b)| a * b).sum();
-
-        let magnitude1: f64 = vec1.iter().map(|x| x * x).sum::<f64>().sqrt();
-        let magnitude2: f64 = vec2.iter().map(|x| x * x).sum::<f64>().sqrt();
-
-        if magnitude1 > 0.0 && magnitude2 > 0.0 {
-            dot_product / (magnitude1 * magnitude2)
-        } else {
-            0.0
         }
     }
 
@@ -326,6 +378,7 @@ impl RecommenderSystem {
             let mut terms: Vec<(&String, &usize)> = doc.term_freq.iter().collect();
             terms.sort_by(|a, b| b.1.cmp(a.1));
 
+            println!("Top 10 terms:");
             for (i, (term, freq)) in terms.iter().take(10).enumerate() {
                 println!("  {}. {} ({})", i + 1, term, freq);
             }
@@ -345,7 +398,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     recommender.load_documents(articles_path)?;
 
     // Example usage: Get recommendations for a specific article
-    let example_article = "airdrop-hunters";
+    let example_article = "wormhole-rekt";
 
     println!("Details for '{}':", example_article);
     recommender.print_document_details(example_article);
