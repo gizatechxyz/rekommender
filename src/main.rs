@@ -19,7 +19,7 @@ struct RecommenderSystem {
     documents: Vec<Document>,
     stemmer: Stemmer,
     stop_words: HashSet<String>,
-    idf_scores: HashMap<String, f64>,
+    idf_scores: HashMap<String, f32>,
     // Regex patterns for filtering irrelevant content
     url_pattern: Regex,
     crypto_address_pattern: Regex,
@@ -28,8 +28,8 @@ struct RecommenderSystem {
     file_path_pattern: Regex,
     // Pre-computed data
     term_set: Vec<String>,            // All unique terms across all documents
-    tfidf_matrix: Vec<Vec<f64>>,      // TF-IDF vectors for all documents
-    similarity_matrix: Vec<Vec<f64>>, // Cosine similarity matrix
+    tfidf_matrix: Vec<Vec<f32>>,      // TF-IDF vectors for all documents
+    similarity_matrix: Vec<Vec<f32>>, // Cosine similarity matrix
 }
 
 impl RecommenderSystem {
@@ -168,10 +168,10 @@ impl RecommenderSystem {
         self.similarity_matrix = vec![vec![0.0; total_docs]; total_docs];
 
         // Pre-compute magnitudes for all documents
-        let magnitudes: Vec<f64> = self
+        let magnitudes: Vec<f32> = self
             .tfidf_matrix
             .iter()
-            .map(|vec| vec.iter().map(|x| x * x).sum::<f64>().sqrt())
+            .map(|vec| vec.iter().map(|x| x * x).sum::<f32>().sqrt())
             .collect();
 
         // Vector of indices to parallelize over
@@ -180,14 +180,14 @@ impl RecommenderSystem {
             .collect();
 
         // Compute similarities in parallel and collect the results
-        let similarities: Vec<(usize, usize, f64)> = indices
+        let similarities: Vec<(usize, usize, f32)> = indices
             .par_iter() // Parallel iterator
             .map(|&(i, j)| {
                 let dot_product = self.tfidf_matrix[i]
                     .iter()
                     .zip(&self.tfidf_matrix[j])
                     .map(|(a, b)| a * b)
-                    .sum::<f64>();
+                    .sum::<f32>();
 
                 let similarity = if magnitudes[i] > 0.0 && magnitudes[j] > 0.0 {
                     dot_product / (magnitudes[i] * magnitudes[j])
@@ -307,7 +307,7 @@ impl RecommenderSystem {
 
     // Calculate IDF scores for all terms in the corpus
     fn calculate_idf_scores(&mut self) {
-        let total_docs = self.documents.len() as f64;
+        let total_docs = self.documents.len() as f32;
         let mut term_doc_count: HashMap<String, usize> = HashMap::new();
 
         // Count documents containing each term
@@ -319,13 +319,13 @@ impl RecommenderSystem {
 
         // Calculate IDF for each term
         for (term, count) in term_doc_count {
-            let idf = (total_docs / (count as f64 + 1.0)).ln();
+            let idf = (total_docs / (count as f32 + 1.0)).ln();
             self.idf_scores.insert(term, idf);
         }
     }
 
     // Calculate TF-IDF score for a term in a document
-    fn calculate_tfidf(&self, term: &str, doc: &Document) -> f64 {
+    fn calculate_tfidf(&self, term: &str, doc: &Document) -> f32 {
         let term_count = *doc.term_freq.get(term).unwrap_or(&0);
 
         if term_count == 0 {
@@ -333,20 +333,20 @@ impl RecommenderSystem {
         }
 
         let total_words: usize = doc.term_freq.values().sum();
-        let tf = term_count as f64 / total_words as f64;
+        let tf = term_count as f32 / total_words as f32;
         let idf = self.idf_scores.get(term).unwrap_or(&0.0);
 
         tf * idf
     }
 
     // Get recommendations for a document by ID using the pre-computed similarity matrix
-    fn get_recommendations(&self, doc_id: &str, num_recommendations: usize) -> Vec<(String, f64)> {
+    fn get_recommendations(&self, doc_id: &str, num_recommendations: usize) -> Vec<(String, f32)> {
         // Find the specified document
         let doc_idx = self.documents.iter().position(|d| d.id == doc_id);
 
         if let Some(idx) = doc_idx {
             // Get the similarities from the pre-computed matrix
-            let similarities: Vec<(usize, f64)> = self.similarity_matrix[idx]
+            let similarities: Vec<(usize, f32)> = self.similarity_matrix[idx]
                 .iter()
                 .enumerate()
                 .filter(|(i, _)| *i != idx) // Filter out the document itself
