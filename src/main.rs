@@ -57,6 +57,8 @@ impl RecommenderSystem {
             "twitter".to_string(),
             "tweet".to_string(),
             "status".to_string(),
+            "attack".to_string(),
+            "exploit".to_string(),
         ]);
 
         let stop_words = all_stop_words.into_iter().collect();
@@ -138,7 +140,10 @@ impl RecommenderSystem {
 
         for doc in &self.documents {
             for term in doc.term_freq.keys() {
-                all_terms.insert(term.clone());
+                // Only include terms that have IDF scores (passed our filters)
+                if self.idf_scores.contains_key(term) {
+                    all_terms.insert(term.clone());
+                }
             }
         }
 
@@ -183,7 +188,7 @@ impl RecommenderSystem {
         // Create a tensor for the TF-IDF matrix
         let tfidf_tensor = graph.tensor((total_docs, total_terms)).set(tfidf_data);
 
-        // Calculate document magnitudes (L2 norms)
+        // L2 Normalize each document vector before computing similarity
         // Square each element in the TF-IDF matrix
         let squared = tfidf_tensor.clone() * tfidf_tensor.clone();
 
@@ -191,18 +196,14 @@ impl RecommenderSystem {
         let sum_squared = squared.sum_reduce(1);
 
         // Take square root to get the magnitude
-        let magnitudes = sum_squared.sqrt();
+        let magnitudes = sum_squared.sqrt() + 1e-8; // Add small epsilon to avoid division by zero
+
+        // Normalize TF-IDF matrix by dividing each row by its magnitude
+        let normalized_tfidf = tfidf_tensor / magnitudes.expand(1, total_terms);
 
         //  Compute all pairwise dot products using matrix multiplication
-        let dot_products = tfidf_tensor.matmul(tfidf_tensor.permute((1, 0)));
-
-        // Prepare magnitudes for division
-        // We need the product of magnitudes for each document pair
-        let mag_outer_product =
-            magnitudes.expand(1, total_docs) * magnitudes.permute(0).expand(0, total_docs);
-
-        //  Calculate cosine similarities by dividing dot products by magnitude products
-        let similarities = dot_products / mag_outer_product;
+        // Since vectors are normalized, dot product equals cosine similarity
+        let similarities = normalized_tfidf.matmul(normalized_tfidf.permute((1, 0)));
 
         // Mark the similarities tensor to be retrieved after graph execution
         let mut result = similarities.retrieve();
@@ -222,6 +223,11 @@ impl RecommenderSystem {
             for j in 0..total_docs {
                 self.similarity_matrix[i][j] = similarity_data[i * total_docs + j];
             }
+        }
+
+        // Normalize self-similarity to exactly 1.0 (floating point precision issues)
+        for i in 0..total_docs {
+            self.similarity_matrix[i][i] = 1.0;
         }
 
         let duration = start_time.elapsed();
@@ -325,6 +331,9 @@ impl RecommenderSystem {
             *term_frequencies.entry(word).or_insert(0) += 1;
         }
 
+        // Filter out extremely rare terms that appear only once
+        term_frequencies.retain(|_, &mut count| count > 1);
+
         term_frequencies
     }
 
@@ -340,25 +349,44 @@ impl RecommenderSystem {
             }
         }
 
-        // Calculate IDF for each term
+        // Filter terms that appear in too few or too many documents
+        let min_doc_threshold = 2; // Appear in at least 2 documents
+        let max_doc_percentage = 0.70; // Don't appear in more than 70% of documents
+        let max_doc_threshold = (total_docs * max_doc_percentage) as usize;
+
+        // Calculate IDF with a smoother formula and apply thresholds
         for (term, count) in term_doc_count {
-            let idf = (total_docs / (count as f32 + 1.0)).ln();
-            self.idf_scores.insert(term, idf);
+            if count >= min_doc_threshold && count <= max_doc_threshold {
+                // log(N/(1+df)) + 1 instead of log(N/df) should give more weight to important terms.
+                let idf = (total_docs / (count as f32 + 1.0)).ln() + 1.0;
+                self.idf_scores.insert(term, idf);
+            }
         }
     }
 
     // Calculate TF-IDF score for a term in a document
     fn calculate_tfidf(&self, term: &str, doc: &Document) -> f32 {
+        // Only calculate for terms with IDF scores
+        if !self.idf_scores.contains_key(term) {
+            return 0.0;
+        }
+
         let term_count = *doc.term_freq.get(term).unwrap_or(&0);
 
         if term_count == 0 {
             return 0.0;
         }
 
-        let total_words: usize = doc.term_freq.values().sum();
-        let tf = term_count as f32 / total_words as f32;
+        // Calculate term frequency using augmented frequency formula
+        // TF = 0.5 + 0.5 * (term_count / max_term_count)
+        // This prevents bias towards longer documents
+        let max_count = doc.term_freq.values().max().unwrap_or(&1);
+        let tf = 0.5 + 0.5 * (term_count as f32 / *max_count as f32);
+
+        // Get IDF score
         let idf = self.idf_scores.get(term).unwrap_or(&0.0);
 
+        // TF-IDF
         tf * idf
     }
 
@@ -421,7 +449,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     recommender.load_documents(articles_path)?;
 
     // Example usage: Get recommendations for a specific article
-    let example_article = "airdrop-hunters";
+    let example_article = "alexlab-rekt";
 
     println!("Details for '{}':", example_article);
     recommender.print_document_details(example_article);
