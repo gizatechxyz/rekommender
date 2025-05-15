@@ -3,6 +3,8 @@
 This project implements a verifiable content-based recommender system, specifically designed to recommend similar articles from a collection of "rekt_articles".
 The system analyzes the textual content of these articles, including their YAML frontmatter, to identify and rank similar incidents and generates a ZK proof of the similarity calcul.
 
+🏗️ Note that this project is in active development. 
+
 ## Core Strategy & Methodology
 
 The recommender system identifies similar articles through these core steps:
