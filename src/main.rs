@@ -15,7 +15,8 @@ use stop_words;
 const TAG_BOOST: usize = 5;
 const AUDITOR_BOOST: usize = 3;
 const MAX_DOC_PERCENTAGE: f32 = 0.80;
-const MIN_DOC_PERCENTAGE: f32 = 0.03;
+const MIN_DOC_THRESHOLD_UNIGRAM: usize = 5; // Unigrams must appear in at least 5 docs
+const MIN_DOC_THRESHOLD_NGRAM: usize = 2;   // N-grams can be rarer, in at least 2 docs
 
 #[derive(Debug, Deserialize)]
 struct Frontmatter {
@@ -318,10 +319,16 @@ impl RecommenderSystem {
         }
 
         let max_doc_threshold = (total_docs * MAX_DOC_PERCENTAGE) as usize;
-        let min_doc_threshold = (total_docs * MIN_DOC_PERCENTAGE) as usize;
 
         for (term, count) in term_doc_count {
-            if count >= min_doc_threshold && count <= max_doc_threshold {
+            // Distinguish min threshold for unigrams vs n-grams
+            let min_threshold = if term.contains('_') { // Simple check for n-gram
+                MIN_DOC_THRESHOLD_NGRAM
+            } else {
+                MIN_DOC_THRESHOLD_UNIGRAM
+            };
+
+            if count >= min_threshold && count <= max_doc_threshold {
                 let idf = (total_docs / (count as f32 + 1.0)).ln() + 1.0;
                 self.idf_scores.insert(term, idf);
             }
@@ -441,7 +448,7 @@ impl RecommenderSystem {
 
     fn print_document_details(&self, doc_id: &str) {
         if let Some(doc) = self.documents.iter().find(|d| d.id == doc_id) {
-            println!("Document: {} (ID: {})", doc.title, doc.id);
+            println!("\n--- Details for Document: {} (ID: {}) ---", doc.title, doc.id);
             if !doc.tags.is_empty() {
                 println!("  Tags: {}", doc.tags.join(", "));
             }
@@ -459,6 +466,7 @@ impl RecommenderSystem {
         } else {
             println!("Document with ID '{}' not found", doc_id);
         }
+
     }
 }
 
@@ -466,7 +474,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut recommender = RecommenderSystem::new();
     recommender.load_documents(Path::new("rekt_articles"))?;
 
-    let example_article = "airdrop-hunters";
+    let example_article = "wintermute-rekt";
     println!("Details for '{}':", example_article);
     recommender.print_document_details(example_article);
 
