@@ -162,6 +162,8 @@ impl RecommenderSystem {
     }
 
     // Compute document magnitudes once and store them
+    // We'll implement the standard cosine similarity formula:
+    // cos(A,B) = (A·B) / (||A|| * ||B||)
     fn calculate_similarity_matrix(&mut self) {
         let start_time = Instant::now();
         let total_docs = self.documents.len();
@@ -169,22 +171,17 @@ impl RecommenderSystem {
         // Initialize a new Luminal graph
         let mut graph = Graph::new();
 
-        // Convert TF-IDF matrix to Vec for Luminal
+        // Convert TF-IDF matrix to Vec<f32> for Luminal
         let tfidf_data: Vec<f32> = self
             .tfidf_matrix
             .iter()
-            .flat_map(|row| row.iter().map(|&val| val))
+            .flat_map(|row| row.iter().map(|&val| val as f32))
             .collect();
 
         let total_terms = self.term_set.len();
 
         // Create a tensor for the TF-IDF matrix
-        let tfidf_tensor = graph
-            .tensor((total_docs, total_terms))
-            .set(self.tfidf_matrix.iter().flat_map(tfidf_data));
-
-        // The standard cosine similarity formula:
-        // cos(A,B) = (A·B) / (||A|| * ||B||)
+        let tfidf_tensor = graph.tensor((total_docs, total_terms)).set(tfidf_data);
 
         // Calculate document magnitudes (L2 norms)
         // Square each element in the TF-IDF matrix
@@ -196,8 +193,7 @@ impl RecommenderSystem {
         // Take square root to get the magnitude
         let magnitudes = sum_squared.sqrt();
 
-        // Compute all pairwise dot products using matrix multiplication
-        // This is equivalent to TF-IDF_matrix × TF-IDF_matrix^T
+        //  Compute all pairwise dot products using matrix multiplication
         let dot_products = tfidf_tensor.matmul(tfidf_tensor.permute((1, 0)));
 
         // Prepare magnitudes for division
@@ -205,16 +201,15 @@ impl RecommenderSystem {
         let mag_outer_product =
             magnitudes.expand(1, total_docs) * magnitudes.permute(0).expand(0, total_docs);
 
-        // Calculate cosine similarities by dividing dot products by magnitude products
+        //  Calculate cosine similarities by dividing dot products by magnitude products
         let similarities = dot_products / mag_outer_product;
 
         // Mark the similarities tensor to be retrieved after graph execution
         let mut result = similarities.retrieve();
 
         // Compile the graph with CPU compiler
-        graph.compile(<(GenericCompiler,)>::default(), &mut result);
+        graph.compile(<(GenericCompiler, CPUCompiler)>::default(), &mut result);
 
-        graph.display();
         // Execute the graph
         graph.execute_debug();
 
@@ -426,7 +421,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     recommender.load_documents(articles_path)?;
 
     // Example usage: Get recommendations for a specific article
-    let example_article = "wormhole-rekt";
+    let example_article = "airdrop-hunters";
 
     println!("Details for '{}':", example_article);
     recommender.print_document_details(example_article);
