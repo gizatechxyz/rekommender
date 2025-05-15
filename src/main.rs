@@ -35,13 +35,12 @@ struct RecommenderSystem {
 
 impl RecommenderSystem {
     fn new() -> Self {
-        // Initialize stemmer and stopwords
+        // Initialize with English stemmer and stopwords
         let stemmer = Stemmer::create(Algorithm::English);
-        let stop_words_vec = stop_words::get(stop_words::LANGUAGE::English);
+        let mut stop_words_vec = stop_words::get(stop_words::LANGUAGE::English);
 
-        // Additional domain-specific stopwords as Rekt News articles covers similar topics.
-        let mut all_stop_words = stop_words_vec;
-        all_stop_words.extend(vec![
+        // Add rekt-specific terms that are too common to be useful for recommendations
+        let rekt_stop_words = vec![
             "eth".to_string(),
             "btc".to_string(),
             "defi".to_string(),
@@ -59,11 +58,13 @@ impl RecommenderSystem {
             "status".to_string(),
             "attack".to_string(),
             "exploit".to_string(),
-        ]);
+        ];
 
-        let stop_words = all_stop_words.into_iter().collect();
+        stop_words_vec.extend(rekt_stop_words);
 
-        // Compile regex patterns
+        let stop_words = stop_words_vec.into_iter().collect();
+
+        // Compile regex patterns once for better performance
         let url_pattern = Regex::new(r"https?://\S+|www\.\S+").unwrap();
         let crypto_address_pattern =
             Regex::new(r"0x[a-fA-F0-9]{40}|[13][a-km-zA-HJ-NP-Z1-9]{25,34}").unwrap();
@@ -318,11 +319,12 @@ impl RecommenderSystem {
             .map(|s| s.to_string())
             .collect();
 
-        // Remove stop words, apply stemming, and filter out invalid terms
+        // Apply stemmming, remove stop words, apply stemming, and filter out invalid terms
         let processed_words: Vec<String> = words
             .into_iter()
-            .filter(|word| !self.stop_words.contains(word) && self.is_valid_term(word))
+            .filter(|word| self.is_valid_term(word))
             .map(|word| self.stemmer.stem(&word).to_string())
+            .filter(|stemmed_word| !self.stop_words.contains(stemmed_word))
             .collect();
 
         // Count term frequencies
