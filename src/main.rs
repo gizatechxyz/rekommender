@@ -4,8 +4,9 @@ use std::fs;
 use std::path::Path;
 use std::time::Instant;
 
+use luminair_graph::graph::LuminairGraph;
+use luminair_graph::StwoCompiler;
 use luminal::prelude::*;
-use luminal_cpu::CPUCompiler;
 use regex::Regex;
 use rust_stemmers::{Algorithm, Stemmer};
 use serde::Deserialize;
@@ -391,18 +392,21 @@ impl RecommenderSystem {
             return;
         }
 
-        let tfidf_tensor = graph.tensor((total_docs, total_terms)).set(tfidf_data);
-        let squared = tfidf_tensor.clone() * tfidf_tensor.clone();
+        let tfidf_tensor = graph.tensor((total_docs, total_terms)).set(tfidf_data.clone());
+        let squared = tfidf_tensor * tfidf_tensor;
         let sum_squared = squared.sum_reduce(1);
-        let magnitudes = sum_squared.sqrt() + 1e-8;
-        let normalized_tfidf = tfidf_tensor / magnitudes.expand(1, total_terms);
-        let similarities_tensor = normalized_tfidf.matmul(normalized_tfidf.permute((1, 0)));
-        let mut result_tensor = similarities_tensor.retrieve();
+        let magnitudes = sum_squared.sqrt() + 1e-1;
+        let  normalized_tfidf = tfidf_tensor / magnitudes.expand(1, total_terms);
+        let mut similarities_tensor = normalized_tfidf.matmul(normalized_tfidf.permute((1, 0))).retrieve();
 
-        graph.compile(<(GenericCompiler, CPUCompiler)>::default(), &mut result_tensor);
-        graph.execute_debug();
+        graph.compile(<(
+        GenericCompiler, 
+        StwoCompiler
+        )>::default(), &mut similarities_tensor);
+        let mut settings = graph.gen_circuit_settings();
+        let _trace = graph.gen_trace(&mut settings);
 
-        let similarity_data = result_tensor.data();
+        let similarity_data = similarities_tensor.data();
 
         self.similarity_matrix = vec![vec![0.0; total_docs]; total_docs];
         for i in 0..total_docs {
