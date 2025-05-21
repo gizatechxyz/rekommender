@@ -399,12 +399,29 @@ impl RecommenderSystem {
         let  normalized_tfidf = tfidf_tensor / magnitudes.expand(1, total_terms);
         let mut similarities_tensor = normalized_tfidf.matmul(normalized_tfidf.permute((1, 0))).retrieve();
 
+
         graph.compile(<(
         GenericCompiler, 
         StwoCompiler
         )>::default(), &mut similarities_tensor);
+
+        let time = Instant::now();
         let mut settings = graph.gen_circuit_settings();
-        let _trace = graph.gen_trace(&mut settings);
+        println!("Setting gen in {:?}", time.elapsed());
+
+        let time = Instant::now();
+        let pie = graph.gen_trace(&mut settings).expect("Trace generation failed");
+        println!("Trace gen in {:?}", time.elapsed());
+        println!("Max LogSize {:?}", pie.execution_resources.max_log_size);
+
+        let time = Instant::now();
+        let proof = graph.prove(pie, settings.clone()).expect("Proving failed");
+        println!("Proof gen in {:?}", time.elapsed());
+
+        let time = Instant::now();
+        graph.verify(proof, settings).expect("Verification failed");
+        println!("Verified in {:?} ✅", time.elapsed());
+
 
         let similarity_data = similarities_tensor.data();
 
