@@ -5,15 +5,11 @@ edition = "2024"
 
 [dependencies]
 luminal = { git = "https://github.com/raphaelDkhn/luminal.git", rev = "80ae0fd" }
-# luminal = {path = "/Users/raphaeldoukhan/Desktop/Giza/Frameworks/luminal"}
-# luminal_cpu = { git = "https://github.com/raphaelDkhn/luminal.git", rev = "80ae0fd" }
-# luminair_graph = { git = "https://github.com/gizatechxyz/LuminAIR.git", rev = "dc8fb1c" }
-luminair_graph = { path = "/Users/raphaeldoukhan/Desktop/Giza/Frameworks/luminair/crates/graph" }
+luminair_graph = { git = "https://github.com/gizatechxyz/LuminAIR.git", rev = "d01edfa" }
 
 rayon = "1.10.0"
 regex = "1.10.0"
 rust-stemmers = "1.2.0"
-# rust-tfidf = "1.1.1" # No longer directly used
 stop-words = "0.8.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"

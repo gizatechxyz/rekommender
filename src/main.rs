@@ -495,7 +495,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut recommender = RecommenderSystem::new();
     recommender.load_documents(Path::new("rekt_articles"))?;
 
-    let example_article = "wintermute-rekt";
+    let example_article = "ape-season-returns";
     println!("Details for '{}':", example_article);
     recommender.print_document_details(example_article);
 

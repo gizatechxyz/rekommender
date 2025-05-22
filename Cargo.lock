@@ -823,6 +823,7 @@ checksum = "13dc2df351e3202783a1fe0d44375f7295ffb4049267b0f3018346dc122a1d94"
 [[package]]
 name = "luminair_air"
 version = "0.0.1"
+source = "git+https://github.com/gizatechxyz/LuminAIR.git?rev=d01edfa#d01edfabe94f79f94d684b679f8400a388778868"
 dependencies = [
  "itertools 0.12.1",
  "luminal",
@@ -841,6 +842,7 @@ dependencies = [
 [[package]]
 name = "luminair_graph"
 version = "0.0.1"
+source = "git+https://github.com/gizatechxyz/LuminAIR.git?rev=d01edfa#d01edfabe94f79f94d684b679f8400a388778868"
 dependencies = [
  "itertools 0.14.0",
  "luminair_air",
@@ -848,7 +850,6 @@ dependencies = [
  "num-traits",
  "numerair",
  "rayon",
- "rustc-hash 2.1.1",
  "serde",
  "stwo-prover",
  "thiserror 2.0.12",
@@ -872,7 +873,7 @@ dependencies = [
  "petgraph",
  "rand 0.8.5",
  "regex",
- "rustc-hash 1.1.0",
+ "rustc-hash",
  "serde",
  "symbolic_expressions",
  "term_size",
@@ -1219,12 +1220,6 @@ name = "rustc-hash"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "08d43f7aa6b08d49f382cde6a7982047c3426db949b1424bc4b7ec9ae12c6ce2"
-
-[[package]]
-name = "rustc-hash"
-version = "2.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "357703d41365b4b27c590e3ed91eabb1b663f07c4c084095e60cbed4362dff0d"
 
 [[package]]
 name = "rustc_version"
