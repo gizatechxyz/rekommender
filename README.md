@@ -1,55 +1,201 @@
-# Rekt Rekommender
+# REKT Recommender API
 
-This project implements a verifiable content-based recommender system, specifically designed to recommend similar articles from a collection of "rekt_articles".
-The system analyzes the textual content of these articles, including their YAML frontmatter, to identify and rank similar incidents and generates a ZK proof of the similarity calcul.
+A Cloud Run service that processes markdown articles to calculate TF-IDF scores, generate cosine similarity matrices, and create cryptographic proofs using Luminal.
 
-🏗️ Note that this project is in active development. 
+## Features
 
-## Core Strategy & Methodology
+- Processes zip files containing markdown articles
+- Calculates TF-IDF scores with n-gram support
+- Generates cosine similarity matrices
+- Creates cryptographic proofs using Luminal/Luminair
+- Returns results as a zip file containing:
+  - Article IDs (JSON)
+  - Similarity matrix (JSON)
+  - Cryptographic proof (binary)
+  - Processing metadata (JSON)
 
-The recommender system identifies similar articles through these core steps:
+## API Endpoints
 
-1.  **Document Loading & Parsing:**
-    *   Loads markdown (`.md`) files from `rekt_articles/`.
-    *   Extracts `title`, `tags`, `auditor`, and `excerpt` from YAML frontmatter. Article filenames serve as unique IDs.
+### Health Check
+```
+GET /health
+```
 
-2.  **Text Preprocessing & Feature Engineering:**
-    *   Combines `excerpt` with main content.
-    *   Cleans text by removing URLs, crypto addresses, Twitter handles, markdown syntax, and standardizing punctuation.
-    *   Tokenizes text, normalizes to lowercase, and applies stemming (reducing words to roots).
-    *   Boosts terms from `tags` and `auditor` names by adding them multiple times to the document's word list.
-    *   Removes common English and domain-specific stop words (stemming occurs *before* stop word removal for accuracy).
-    *   Generates bi-grams and tri-grams (e.g., "smart_contract") from processed tokens.
-    *   Filters terms: removes very short, numeric/mostly-numeric terms, and terms appearing only once per document.
+Returns service health status.
 
-3.  **TF-IDF Calculation:**
-    *   Calculates smoothed Inverse Document Frequency (IDF) scores for all unique terms, filtering by minimum and maximum document frequency thresholds (different for unigrams and n-grams).
-    *   Constructs a TF-IDF matrix: documents (rows) vs. terms (columns), with each cell containing the TF-IDF score (using augmented term frequency).
+### Process Articles
+```
+POST /process
+Content-Type: application/zip
+Body: ZIP file containing markdown articles
+```
 
-4.  **Verifiable Similarity Calculation (Cosine Similarity with LuminAIR):**
-    *   Uses `LuminAIR` for efficient tensor-based cosine similarity.
-    *   The TF-IDF matrix is converted to a `LuminAIR` tensor.
-    *   Each document's TF-IDF vector is L2 normalized.
-    *   The cosine similarity matrix is computed by multiplying the normalized TF-IDF tensor by its transpose. This matrix is pre-computed on load.
+Returns a ZIP file with processing results.
 
-5.  **Generating Recommendations:**
-    *   For a given article, its similarity scores with all other articles are retrieved from the pre-computed similarity matrix.
-    *   Scores are sorted, and the top N articles are returned as recommendations.
+## Input Format
 
-## How to Run
+The input should be a ZIP file containing markdown articles with YAML frontmatter:
 
-1.  **Prerequisites**: Ensure you have Rust installed.
-2.  **Clone the Repository**
-3.  **Place Articles**: Add your markdown articles into the `rekt_articles/` directory.
-4.  **Run the Application**:
-    ```bash
-    cargo run --release
-    ```
-    The `--release` flag is recommended for better performance.
+```markdown
+---
+title: Article Title
+date: 12/08/2021
+rekt:
+  amount: 1750000
+  audit: Unaudited
+  date: 12/08/2021
+tags:
+  - tag1
+  - tag2
+excerpt: Brief description
+---
 
-The `main` function in `src/main.rs` demonstrates an example usage:
+Article content here...
+```
 
-- It initializes the `RecommenderSystem`.
-- Loads and processes documents from the `rekt_articles` directory.
-- Prints details for an example article (`wintermute-rekt`).
-- Fetches and prints the top 5 recommendations for that article, including their similarity scores and details.
+## Output Format
+
+The API returns a ZIP file containing:
+
+1. **article_ids.json** - Array of processed article IDs
+2. **similarity_matrix.json** - 2D array of similarity scores
+3. **proof.bin** - Binary cryptographic proof
+4. **metadata.json** - Processing metadata including:
+   - Request ID
+   - Timestamp
+   - Number of articles processed
+   - Matrix dimensions
+   - Proof size
+
+## Deployment
+
+### Prerequisites
+
+- Google Cloud Project with Cloud Run API enabled
+- Docker installed locally (for local testing)
+- gcloud CLI configured
+
+### Deploy to Cloud Run
+
+1. Build and deploy using Cloud Build:
+```bash
+gcloud builds submit --config cloudbuild.yaml
+```
+
+2. Or deploy manually:
+```bash
+# Build image
+docker build -t gcr.io/YOUR_PROJECT_ID/rekt-recommender-api .
+
+# Push to Container Registry
+docker push gcr.io/YOUR_PROJECT_ID/rekt-recommender-api
+
+# Deploy to Cloud Run
+gcloud run deploy rekt-recommender-api \
+  --image gcr.io/YOUR_PROJECT_ID/rekt-recommender-api \
+  --region us-central1 \
+  --platform managed \
+  --memory 2Gi \
+  --cpu 2 \
+  --timeout 300 \
+  --max-instances 10 \
+  --set-env-vars MAX_UPLOAD_SIZE_MB=100
+```
+
+### Environment Variables
+
+- `PORT` - Server port (default: 8080)
+- `MAX_UPLOAD_SIZE_MB` - Maximum upload size in MB (default: 100)
+
+## Local Development
+
+1. Install Rust and dependencies:
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+2. Build and run:
+```bash
+cargo build --release
+cargo run --release
+```
+
+3. Test with curl:
+```bash
+# Create a test zip file
+zip -r test_articles.zip path/to/markdown/files/
+
+# Send request
+curl -X POST http://localhost:8080/process \
+  -H "Content-Type: application/zip" \
+  --data-binary @test_articles.zip \
+  --output results.zip
+```
+
+## Authorization
+
+To add authorization to your Cloud Run service:
+
+1. Deploy with `--no-allow-unauthenticated` flag:
+```bash
+gcloud run deploy rekt-recommender-api \
+  --image gcr.io/YOUR_PROJECT_ID/rekt-recommender-api \
+  --no-allow-unauthenticated \
+  --region us-central1
+```
+
+2. Grant access to specific service accounts:
+```bash
+gcloud run services add-iam-policy-binding rekt-recommender-api \
+  --member="serviceAccount:YOUR_SERVICE_ACCOUNT@YOUR_PROJECT.iam.gserviceaccount.com" \
+  --role="roles/run.invoker" \
+  --region us-central1
+```
+
+3. Call the API with authentication:
+```bash
+# Get auth token
+TOKEN=$(gcloud auth print-identity-token)
+
+# Make authenticated request
+curl -X POST https://YOUR_CLOUD_RUN_URL/process \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/zip" \
+  --data-binary @test_articles.zip \
+  --output results.zip
+```
+
+## Performance Considerations
+
+- The service processes articles in memory
+- Large document sets may require increased memory allocation
+- Proof generation is computationally intensive
+- Consider using Cloud Run's CPU boost feature for better cold start performance
+
+## Error Handling
+
+The API returns JSON error responses with the following structure:
+```json
+{
+  "request_id": "uuid",
+  "status": "error",
+  "message": "Error description",
+  "data": null
+}
+```
+
+Common error codes:
+- 400: Invalid request (wrong content type, invalid zip)
+- 413: Payload too large
+- 500: Internal server error
+
+## Monitoring
+
+Monitor your service using:
+- Cloud Run metrics in Google Cloud Console
+- Cloud Logging for application logs
+- Cloud Trace for performance analysis
+
+## License
+
+[Your License Here]

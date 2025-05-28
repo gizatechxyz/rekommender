@@ -1,17 +1,30 @@
 [package]
-name = "rekommender"
+name = "rekt-recommender-api"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
-luminal = { git = "https://github.com/raphaelDkhn/luminal.git", rev = "80ae0fd" }
-luminair_graph = { git = "https://github.com/gizatechxyz/LuminAIR.git", rev = "d01edfa" }
-
-rayon = "1.10.0"
-regex = "1.10.0"
-rust-stemmers = "1.2.0"
-stop-words = "0.8.1"
-serde = { version = "1.0", features = ["derive"] }
+rocket = { version = "0.5", features = ["json"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 serde_yaml = "0.9"
-instant = "0.1.13"
-rand = "0.9.1"
+zip = "0.6"
+tempfile = "3"
+uuid = { version = "1", features = ["v4"] }
+base64 = "0.21"
+bincode = "1"
+
+luminair = { git = "https://github.com/gizatechxyz/LuminAIR.git", rev = "a6b5027" }
+regex = "1"
+rust-stemmers = "1"
+stop-words = "0.8"
+
+anyhow = "1"
+thiserror = "1"
+chrono = "0.4.41"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
