@@ -18,6 +18,7 @@ const AUDITOR_BOOST: usize = 3;
 const MAX_DOC_PERCENTAGE: f32 = 0.80;
 const MIN_DOC_THRESHOLD_UNIGRAM: usize = 5; // Unigrams must appear in at least 5 docs
 const MIN_DOC_THRESHOLD_NGRAM: usize = 2;   // N-grams can be rarer, in at least 2 docs
+const MAX_ARTICLES: usize = 70; // Limit to most recent articles
 
 #[derive(Debug, Deserialize)]
 struct Frontmatter {
@@ -104,80 +105,97 @@ impl RecommenderSystem {
     fn load_documents(&mut self, directory: &Path) -> Result<(), Box<dyn Error>> {
         let start_time = Instant::now();
 
+        // First, collect all .md files with their metadata
+        let mut file_entries = Vec::new();
         for entry in fs::read_dir(directory)? {
             let entry = entry?;
             let path = entry.path();
 
             if path.is_file() && path.extension().map_or(false, |ext| ext == "md") {
-                let full_content = fs::read_to_string(&path)?;
-                let file_name_id = path.file_stem().unwrap().to_string_lossy().to_string();
+                let metadata = fs::metadata(&path)?;
+                let modified_time = metadata.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                file_entries.push((path, modified_time));
+            }
+        }
 
-                let mut frontmatter_str = "";
-                let mut main_content_str = full_content.as_str();
+        // Sort by modification time (most recent first)
+        file_entries.sort_by(|a, b| b.1.cmp(&a.1));
 
-                if full_content.starts_with("---") {
-                    // Find the end of the frontmatter block
-                    // Look for the *second* occurrence of "\n---", which marks the true end of the YAML block
-                    // Add 3 to skip the initial "---"
-                    if let Some(fm_content_end_offset) = full_content[3..].find("\n---") {
-                        let actual_fm_content_end = 3 + fm_content_end_offset;
-                        frontmatter_str = &full_content[..actual_fm_content_end]; // The YAML content itself, excluding final delimiter
-                        
-                        // Content starts after the "\n---" and its following newline
-                        let content_start_offset = actual_fm_content_end + "\n---".len();
-                        if content_start_offset < full_content.len() {
-                            // Skip the newline character that might follow the delimiter
-                            if full_content.as_bytes().get(content_start_offset) == Some(&b'\n') {
-                                main_content_str = &full_content[content_start_offset + 1..];
-                            } else {
-                                main_content_str = &full_content[content_start_offset..];
-                            }
+        // Take only the most recent MAX_ARTICLES files
+        let files_to_process = file_entries.into_iter().take(MAX_ARTICLES);
+        let mut processed_count = 0;
+
+        for (path, _) in files_to_process {
+            let full_content = fs::read_to_string(&path)?;
+            let file_name_id = path.file_stem().unwrap().to_string_lossy().to_string();
+
+            let mut frontmatter_str = "";
+            let mut main_content_str = full_content.as_str();
+
+            if full_content.starts_with("---") {
+                // Find the end of the frontmatter block
+                // Look for the *second* occurrence of "\n---", which marks the true end of the YAML block
+                // Add 3 to skip the initial "---"
+                if let Some(fm_content_end_offset) = full_content[3..].find("\n---") {
+                    let actual_fm_content_end = 3 + fm_content_end_offset;
+                    frontmatter_str = &full_content[..actual_fm_content_end]; // The YAML content itself, excluding final delimiter
+                    
+                    // Content starts after the "\n---" and its following newline
+                    let content_start_offset = actual_fm_content_end + "\n---".len();
+                    if content_start_offset < full_content.len() {
+                        // Skip the newline character that might follow the delimiter
+                        if full_content.as_bytes().get(content_start_offset) == Some(&b'\n') {
+                            main_content_str = &full_content[content_start_offset + 1..];
                         } else {
-                            main_content_str = ""; // No content after frontmatter
+                            main_content_str = &full_content[content_start_offset..];
                         }
                     } else {
-                        // Starts with --- but no proper second delimiter found. 
-                        // This could be an unterminated frontmatter or just a line of dashes.
-                        // Treat as no valid frontmatter in this case.
-                        main_content_str = full_content.as_str();
-                        frontmatter_str = "";
-                        println!("Warning: Document {} starts with --- but no clear end delimiter found. Treating as no frontmatter.", file_name_id);
+                        main_content_str = ""; // No content after frontmatter
                     }
+                } else {
+                    // Starts with --- but no proper second delimiter found. 
+                    // This could be an unterminated frontmatter or just a line of dashes.
+                    // Treat as no valid frontmatter in this case.
+                    main_content_str = full_content.as_str();
+                    frontmatter_str = "";
+                    println!("Warning: Document {} starts with --- but no clear end delimiter found. Treating as no frontmatter.", file_name_id);
                 }
-                
-                let frontmatter: Frontmatter = serde_yaml::from_str(frontmatter_str)
-                    .unwrap_or_else(|e| {
-                        if !frontmatter_str.is_empty() {
-                            println!(
-                                "Warning: Failed to parse frontmatter for {}: {}. Frontmatter was: '{}...'. Using defaults.",
-                                file_name_id,
-                                e,
-                                frontmatter_str.chars().take(100).collect::<String>() // Print more for debugging
-                            );
-                        }
-                        Frontmatter { 
-                            title: file_name_id.replace("-", " "),
-                            tags: None, 
-                            rekt: None, 
-                            excerpt: None 
-                        }
-                    });
-
-                let term_freq = self.process_text(
-                    main_content_str, 
-                    &frontmatter.tags.clone().unwrap_or_default(),
-                    &frontmatter.rekt.as_ref().and_then(|r| r.audit.clone()),
-                    &frontmatter.excerpt.clone()
-                );
-                
-                self.documents.push(Document {
-                    id: file_name_id,
-                    title: frontmatter.title,
-                    tags: frontmatter.tags.unwrap_or_default(),
-                    auditor: frontmatter.rekt.and_then(|r| r.audit),
-                    term_freq,
-                });
             }
+            
+            let frontmatter: Frontmatter = serde_yaml::from_str(frontmatter_str)
+                .unwrap_or_else(|e| {
+                    if !frontmatter_str.is_empty() {
+                        println!(
+                            "Warning: Failed to parse frontmatter for {}: {}. Frontmatter was: '{}...'. Using defaults.",
+                            file_name_id,
+                            e,
+                            frontmatter_str.chars().take(100).collect::<String>() // Print more for debugging
+                        );
+                    }
+                    Frontmatter { 
+                        title: file_name_id.replace("-", " "),
+                        tags: None, 
+                        rekt: None, 
+                        excerpt: None 
+                    }
+                });
+
+            let term_freq = self.process_text(
+                main_content_str, 
+                &frontmatter.tags.clone().unwrap_or_default(),
+                &frontmatter.rekt.as_ref().and_then(|r| r.audit.clone()),
+                &frontmatter.excerpt.clone()
+            );
+            
+            self.documents.push(Document {
+                id: file_name_id,
+                title: frontmatter.title,
+                tags: frontmatter.tags.unwrap_or_default(),
+                auditor: frontmatter.rekt.and_then(|r| r.audit),
+                term_freq,
+            });
+
+            processed_count += 1;
         }
 
         self.calculate_idf_scores();
@@ -187,8 +205,8 @@ impl RecommenderSystem {
 
         let duration = start_time.elapsed();
         println!(
-            "Loaded and processed {} documents in {:.2?}",
-            self.documents.len(),
+            "Loaded and processed {} most recent documents (out of available files) in {:.2?}",
+            processed_count,
             duration
         );
         Ok(())
@@ -507,4 +525,3 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
     Ok(())
 }
-
