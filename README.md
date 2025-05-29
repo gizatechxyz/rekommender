@@ -128,7 +128,7 @@ zip -r test_articles.zip path/to/markdown/files/
 # Send request
 curl -X POST http://localhost:8080/process \
   -H "Content-Type: application/zip" \
-  --data-binary @test_articles.zip \
+  --data-binary @rekt_articles.zip \
   --output results.zip
 ```
 

@@ -262,8 +262,6 @@ fn rocket() -> _ {
         .parse::<u16>()
         .expect("PORT must be a valid u16");
 
-    println!("yoo");
-
     let max_upload_size = std::env::var("MAX_UPLOAD_SIZE_MB")
         .unwrap_or_else(|_| "100".to_string())
         .parse::<usize>()
