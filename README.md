@@ -123,7 +123,7 @@ cargo run --release
 3. Test with curl:
 ```bash
 # Create a test zip file
-zip -r test_articles.zip path/to/markdown/files/
+cd rekt_articles && zip -r ../rekt_articles.zip *.md && cd ..
 
 # Send request
 curl -X POST http://localhost:8080/process \

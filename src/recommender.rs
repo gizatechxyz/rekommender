@@ -52,6 +52,7 @@ pub struct RecommenderSystem {
     tfidf_matrix: Vec<Vec<f32>>,
     similarity_matrix: Vec<Vec<f32>>,
     proof_data: Vec<u8>,
+    circuit_settings: Vec<u8>,
 }
 
 impl RecommenderSystem {
@@ -110,6 +111,7 @@ impl RecommenderSystem {
             tfidf_matrix: Vec::new(),
             similarity_matrix: Vec::new(),
             proof_data: Vec::new(),
+            circuit_settings: Vec::new(),
         }
     }
 
@@ -426,8 +428,11 @@ impl RecommenderSystem {
             .context("Trace generation failed")?;
         let proof = prove(pie, settings.clone()).context("Proving failed")?;
 
-        // Serialize proof to binary
+        // Serialize proof and settings to binary
         self.proof_data = proof.to_bincode().context("Failed to serialize proof")?;
+        self.circuit_settings = settings
+            .to_bincode()
+            .context("Failed to serialize settings")?;
 
         verify(proof, settings).context("Verification failed")?;
 
