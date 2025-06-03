@@ -10,28 +10,29 @@ steps:
       echo $VERSION > /workspace/version.txt
       echo "Extracted: PROJECT_NAME=$PROJECT_NAME, VERSION=$VERSION"
 
-  # Build the Docker image
+  # Build the Docker image using Artifact Registry
   - name: 'gcr.io/cloud-builders/docker'
     id: 'docker-build'
     script: |
       #!/bin/bash
       PROJECT_NAME=$(cat /workspace/project_name.txt)
       VERSION=$(cat /workspace/version.txt)
+      # Using Artifact Registry instead of deprecated Container Registry
       docker build \
-        --tag="gcr.io/giza-platform-common/agents/$PROJECT_NAME:$VERSION" \
-        --tag="gcr.io/giza-platform-common/agents/$PROJECT_NAME:latest" \
+        --tag="europe-west1-docker.pkg.dev/giza-platform-common/agents/$PROJECT_NAME:$VERSION" \
+        --tag="europe-west1-docker.pkg.dev/giza-platform-common/agents/$PROJECT_NAME:latest" \
         --file=Dockerfile \
         .
     env:
       - 'DOCKER_BUILDKIT=1'
 
-  # Push the image to Container Registry
+  # Push the image to Artifact Registry
   - name: 'gcr.io/cloud-builders/docker'
     id: 'docker-push'
     script: |
       #!/bin/bash
       PROJECT_NAME=$(cat /workspace/project_name.txt)
-      docker push --all-tags "gcr.io/giza-platform-common/agents/$PROJECT_NAME"
+      docker push --all-tags "europe-west1-docker.pkg.dev/giza-platform-common/agents/$PROJECT_NAME"
 
   # Deploy to Cloud Run
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
@@ -41,8 +42,8 @@ steps:
       PROJECT_NAME=$(cat /workspace/project_name.txt)
       VERSION=$(cat /workspace/version.txt)
       gcloud run deploy "$PROJECT_NAME" \
-        --image="gcr.io/giza-platform-common/agents/$PROJECT_NAME:$VERSION" \
-        --region=us-central1 \
+        --image="europe-west1-docker.pkg.dev/giza-platform-common/agents/$PROJECT_NAME:$VERSION" \
+        --region=europe-west1 \
         --platform=managed \
         --memory=4Gi \
         --cpu=2 \
