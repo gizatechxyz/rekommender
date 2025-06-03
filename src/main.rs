@@ -8,6 +8,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use rocket::data::{Data, ToByteUnit};
 use rocket::http::{ContentType, Status};
+use rocket::request::{FromRequest, Outcome, Request};
 use rocket::response::status::Custom;
 use rocket::serde::json::Json;
 use rocket::State;
@@ -44,6 +45,45 @@ struct HealthResponse {
 
 struct AppState {
     max_upload_size: usize,
+    api_key: String,
+}
+
+// API Key request guard
+struct ApiKey;
+
+#[rocket::async_trait]
+impl<'r> FromRequest<'r> for ApiKey {
+    type Error = ();
+
+    async fn from_request(request: &'r Request<'_>) -> Outcome<Self, Self::Error> {
+        let state = request.guard::<&State<AppState>>().await;
+
+        match state {
+            Outcome::Success(app_state) => {
+                if let Some(key) = request.headers().get_one("X-API-Key") {
+                    if key == app_state.api_key {
+                        Outcome::Success(ApiKey)
+                    } else {
+                        Outcome::Error((Status::Unauthorized, ()))
+                    }
+                } else if let Some(key) = request.headers().get_one("Authorization") {
+                    // Accept Bearer token format
+                    if let Some(bearer_key) = key.strip_prefix("Bearer ") {
+                        if bearer_key == app_state.api_key {
+                            Outcome::Success(ApiKey)
+                        } else {
+                            Outcome::Error((Status::Unauthorized, ()))
+                        }
+                    } else {
+                        Outcome::Error((Status::Unauthorized, ()))
+                    }
+                } else {
+                    Outcome::Error((Status::Unauthorized, ()))
+                }
+            }
+            _ => Outcome::Error((Status::InternalServerError, ())),
+        }
+    }
 }
 
 #[get("/health")]
@@ -60,6 +100,7 @@ async fn process_articles(
     data: Data<'_>,
     state: &State<AppState>,
     content_type: &ContentType,
+    _api_key: ApiKey,
 ) -> Result<(Status, Vec<u8>), Custom<Json<ApiResponse>>> {
     let request_id = Uuid::new_v4().to_string();
 
@@ -235,6 +276,16 @@ fn create_output_zip(output_dir: &Path) -> Result<Vec<u8>> {
     Ok(buffer)
 }
 
+#[catch(401)]
+fn unauthorized() -> Json<ApiResponse> {
+    Json(ApiResponse {
+        request_id: Uuid::new_v4().to_string(),
+        status: "error".to_string(),
+        message: "Unauthorized. Valid API key required in X-API-Key header or Authorization: Bearer <key>".to_string(),
+        data: None,
+    })
+}
+
 #[catch(404)]
 fn not_found() -> Json<ApiResponse> {
     Json(ApiResponse {
@@ -268,13 +319,22 @@ fn rocket() -> _ {
         .expect("MAX_UPLOAD_SIZE_MB must be a valid usize")
         * 1_048_576; // Convert MB to bytes
 
+    let api_key = std::env::var("API_KEY").expect("API_KEY environment variable must be set");
+
+    if api_key.len() < 16 {
+        panic!("API_KEY must be at least 16 characters long for security");
+    }
+
     rocket::build()
         .configure(rocket::Config {
             port,
             address: std::net::IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0)),
             ..Default::default()
         })
-        .manage(AppState { max_upload_size })
+        .manage(AppState {
+            max_upload_size,
+            api_key,
+        })
         .mount("/", routes![health, process_articles])
-        .register("/", catchers![not_found, internal_error])
+        .register("/", catchers![unauthorized, not_found, internal_error])
 }

@@ -40,6 +40,15 @@ steps:
       #!/bin/bash
       PROJECT_NAME=$(cat /workspace/project_name.txt)
       VERSION=$(cat /workspace/version.txt)
+
+      # Generate a secure API key if not provided
+      if [ -z "$_API_KEY" ]; then
+        API_KEY=$(openssl rand -hex 32)
+        echo "Generated API Key: $API_KEY"
+      else
+        API_KEY="$_API_KEY"
+      fi
+      
       gcloud run deploy "$PROJECT_NAME" \
         --image="europe-west1-docker.pkg.dev/giza-platform-common/agents/$PROJECT_NAME:$VERSION" \
         --region=europe-west1 \
@@ -50,8 +59,11 @@ steps:
         --max-instances=10 \
         --cpu-boost \
         --execution-environment=gen2 \
-        --set-env-vars=MAX_UPLOAD_SIZE_MB=100,RUST_BACKTRACE=1 \
+        --set-env-vars=MAX_UPLOAD_SIZE_MB=100,RUST_BACKTRACE=1,API_KEY="$API_KEY" \
         --allow-unauthenticated
+
+substitutions:
+  _API_KEY: ''
 
 timeout: 1200s
 
