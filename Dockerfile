@@ -11,7 +11,8 @@ COPY Cargo.toml Cargo.lock ./
 COPY rust-toolchain.toml ./
 COPY src ./src
 
-ENV RUSTFLAGS="-C target-cpu=native"
+# Enable SIMD for x86_64 Cloud Run instances
+ENV RUSTFLAGS="-C target-cpu=x86-64-v3 -C target-feature=+avx2,+fma"
 
 RUN cargo build --release
 
