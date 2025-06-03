@@ -2010,6 +2010,7 @@ dependencies = [
  "bincode",
  "chrono",
  "luminair",
+ "rayon",
  "regex",
  "rocket",
  "rust-stemmers",
