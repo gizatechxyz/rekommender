@@ -17,7 +17,6 @@ steps:
       #!/bin/bash
       PROJECT_NAME=$(cat /workspace/project_name.txt)
       VERSION=$(cat /workspace/version.txt)
-      # Using Artifact Registry instead of deprecated Container Registry
       docker build \
         --tag="europe-west1-docker.pkg.dev/giza-platform-common/agents/$PROJECT_NAME:$VERSION" \
         --tag="europe-west1-docker.pkg.dev/giza-platform-common/agents/$PROJECT_NAME:latest" \
