@@ -165,7 +165,7 @@ async fn process_zip_file(zip_bytes: &[u8], request_id: &str) -> Result<Vec<u8>>
 
     // Process articles
     let mut recommender = RecommenderSystem::new();
-    let (article_ids, proof_data) = recommender
+    let (article_ids, proof_data, circuit_settings) = recommender
         .load_and_process(&input_dir)
         .context("Failed to process articles")?;
 
@@ -178,6 +178,7 @@ async fn process_zip_file(zip_bytes: &[u8], request_id: &str) -> Result<Vec<u8>>
         &article_ids,
         &similarity_matrix,
         &proof_data,
+        &circuit_settings,
         request_id,
     )
     .context("Failed to save outputs")?;
@@ -218,6 +219,7 @@ fn save_outputs(
     article_ids: &[String],
     similarity_matrix: &Vec<Vec<f32>>,
     proof_data: &[u8],
+    circuit_settings: &[u8],
     request_id: &str,
 ) -> Result<()> {
     // Save article IDs
@@ -234,6 +236,10 @@ fn save_outputs(
     let proof_path = output_dir.join("proof.bin");
     fs::write(&proof_path, proof_data)?;
 
+    // Save circuit circuit_settings as circuit_settings.bin
+    let settings_path = output_dir.join("circuit_settings.bin");
+    fs::write(&settings_path, circuit_settings)?;
+
     // Save metadata
     let metadata = serde_json::json!({
         "request_id": request_id,
@@ -241,6 +247,7 @@ fn save_outputs(
         "articles_processed": article_ids.len(),
         "matrix_shape": [similarity_matrix.len(), similarity_matrix.get(0).map_or(0, |row| row.len())],
         "proof_size_bytes": proof_data.len(),
+        "settings_size_bytes": circuit_settings.len(),
     });
     let metadata_path = output_dir.join("metadata.json");
     fs::write(&metadata_path, serde_json::to_string_pretty(&metadata)?)?;

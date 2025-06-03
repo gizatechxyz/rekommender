@@ -14,6 +14,7 @@ use stop_words;
 const TAG_BOOST: usize = 5;
 const AUDITOR_BOOST: usize = 3;
 const MAX_DOC_PERCENTAGE: f32 = 0.80;
+const MAX_FILES: usize = 70;
 const MIN_DOC_THRESHOLD_UNIGRAM: usize = 5;
 const MIN_DOC_THRESHOLD_NGRAM: usize = 2;
 
@@ -115,7 +116,10 @@ impl RecommenderSystem {
         }
     }
 
-    pub fn load_and_process(&mut self, directory: &Path) -> Result<(Vec<String>, Vec<u8>)> {
+    pub fn load_and_process(
+        &mut self,
+        directory: &Path,
+    ) -> Result<(Vec<String>, Vec<u8>, Vec<u8>)> {
         let start_time = Instant::now();
 
         // Load documents
@@ -132,7 +136,11 @@ impl RecommenderSystem {
         let duration = start_time.elapsed();
         println!("Total processing time: {:.2?}", duration);
 
-        Ok((article_ids, self.proof_data.clone()))
+        Ok((
+            article_ids,
+            self.proof_data.clone(),
+            self.circuit_settings.clone(),
+        ))
     }
 
     fn load_documents(&mut self, directory: &Path) -> Result<()> {
@@ -152,6 +160,11 @@ impl RecommenderSystem {
         }
 
         file_entries.sort_by(|a, b| b.1.cmp(&a.1));
+
+        // Keep only the first
+        if file_entries.len() > MAX_FILES {
+            file_entries.truncate(MAX_FILES);
+        }
 
         for (path, _) in file_entries {
             let full_content = fs::read_to_string(&path)?;
@@ -422,19 +435,19 @@ impl RecommenderSystem {
             &mut similarities_tensor,
         );
 
-        let mut settings = graph.gen_circuit_settings();
+        let mut circuit_settings = graph.gen_circuit_settings();
         let pie = graph
-            .gen_trace(&mut settings)
+            .gen_trace(&mut circuit_settings)
             .context("Trace generation failed")?;
-        let proof = prove(pie, settings.clone()).context("Proving failed")?;
+        let proof = prove(pie, circuit_settings.clone()).context("Proving failed")?;
 
-        // Serialize proof and settings to binary
+        // Serialize proof and circuit_settings to binary
         self.proof_data = proof.to_bincode().context("Failed to serialize proof")?;
-        self.circuit_settings = settings
+        self.circuit_settings = circuit_settings
             .to_bincode()
-            .context("Failed to serialize settings")?;
+            .context("Failed to serialize circuit_settings")?;
 
-        verify(proof, settings).context("Verification failed")?;
+        verify(proof, circuit_settings).context("Verification failed")?;
 
         let similarity_data = similarities_tensor.data();
 
