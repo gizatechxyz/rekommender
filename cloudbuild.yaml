@@ -1,40 +1,57 @@
 steps:
+  # Extract project name and version
+  - name: 'ubuntu'
+    id: 'extract-metadata'
+    script: |
+      #!/bin/bash
+      PROJECT_NAME=$(sed -n 's/^name = "\(.*\)"/\1/p' Cargo.toml)
+      VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml)
+      echo $PROJECT_NAME > /workspace/project_name.txt
+      echo $VERSION > /workspace/version.txt
+      echo "Extracted: PROJECT_NAME=$PROJECT_NAME, VERSION=$VERSION"
+
   # Build the Docker image
   - name: 'gcr.io/cloud-builders/docker'
-    args:
-      - 'build'
-      - '--tag=gcr.io/$PROJECT_ID/rekt-recommender-api:$COMMIT_SHA'
-      - '--tag=gcr.io/$PROJECT_ID/rekt-recommender-api:latest'
-      - '--file=Dockerfile'
-      - '.'
+    id: 'docker-build'
+    script: |
+      #!/bin/bash
+      PROJECT_NAME=$(cat /workspace/project_name.txt)
+      VERSION=$(cat /workspace/version.txt)
+      docker build \
+        --tag="gcr.io/giza-platform-common/agents/$PROJECT_NAME:$VERSION" \
+        --tag="gcr.io/giza-platform-common/agents/$PROJECT_NAME:latest" \
+        --file=Dockerfile \
+        .
     env:
       - 'DOCKER_BUILDKIT=1'
 
   # Push the image to Container Registry
   - name: 'gcr.io/cloud-builders/docker'
-    args:
-      - 'push'
-      - '--all-tags'
-      - 'gcr.io/$PROJECT_ID/rekt-recommender-api'
+    id: 'docker-push'
+    script: |
+      #!/bin/bash
+      PROJECT_NAME=$(cat /workspace/project_name.txt)
+      docker push --all-tags "gcr.io/giza-platform-common/agents/$PROJECT_NAME"
 
   # Deploy to Cloud Run
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
-    entrypoint: gcloud
-    args:
-      - 'run'
-      - 'deploy'
-      - 'rekt-recommender-api'
-      - '--image=gcr.io/$PROJECT_ID/rekt-recommender-api:$COMMIT_SHA'
-      - '--region=us-central1'
-      - '--platform=managed'
-      - '--memory=4Gi'
-      - '--cpu=2'
-      - '--timeout=300'
-      - '--max-instances=10'
-      - '--cpu-boost'
-      - '--execution-environment=gen2'
-      - '--set-env-vars=MAX_UPLOAD_SIZE_MB=100,RUST_BACKTRACE=1'
-      - '--allow-unauthenticated'
+    id: 'deploy'
+    script: |
+      #!/bin/bash
+      PROJECT_NAME=$(cat /workspace/project_name.txt)
+      VERSION=$(cat /workspace/version.txt)
+      gcloud run deploy "$PROJECT_NAME" \
+        --image="gcr.io/giza-platform-common/agents/$PROJECT_NAME:$VERSION" \
+        --region=us-central1 \
+        --platform=managed \
+        --memory=4Gi \
+        --cpu=2 \
+        --timeout=300 \
+        --max-instances=10 \
+        --cpu-boost \
+        --execution-environment=gen2 \
+        --set-env-vars=MAX_UPLOAD_SIZE_MB=100,RUST_BACKTRACE=1 \
+        --allow-unauthenticated
 
 timeout: 1200s
 
