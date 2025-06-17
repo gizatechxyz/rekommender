@@ -60,7 +60,7 @@ steps:
         --min-instances=0 \
         --cpu-boost \
         --execution-environment=gen2 \
-        --set-env-vars=MAX_UPLOAD_SIZE_MB=100,RUST_BACKTRACE=1,API_KEY="$API_KEY",RUST_LOG=info \
+        --set-env-vars=MAX_UPLOAD_SIZE_MB=100,RUST_BACKTRACE=1,API_KEY="$API_KEY",RUST_LOG=info,OUTPUT_DIR=/app/outputs,RESULT_TTL_HOURS=24 \
         --allow-unauthenticated
 
 substitutions:

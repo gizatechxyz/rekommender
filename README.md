@@ -22,7 +22,7 @@ When the Rekt team adds new articles, they upload the updated article dataset (a
 ```bash
 curl -X POST \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: 3e6ededaaa438fa4cca129fc674cdde5e84d9275d6dd6068867ca06e0e732d1e" \
+  -H "X-API-Key: 35afbc42ff21e45908f6265f0c3725422489f027ffc6da473f628015bba64ff9" \
   --data-binary @content.json \
   "https://rekt-recommender-api-132737210721.europe-west1.run.app/process"
 ```
@@ -31,11 +31,71 @@ curl -X POST \
 - The API processes the 70 most recent articles from the JSON input
 - Computes embeddings and calculates cosine similarity matrix between all articles
 - Generates a STARK proof of the similarity computation
-- Returns a JSON response containing the output directory path with:
-  - `similarity_matrix.json` - The computed similarities
-  - `proof.bin` - STARK proof file
-  - `circuit_settings.bin` - Verification settings
-  - `metadata.json` - Article metadata and mapping
+- Returns a JSON response with processing details and a `request_id`
+
+**Response Format:**
+```json
+{
+  "request_id": "212156f8-1178-4883-bd8e-9598bb6212e4",
+  "status": "success",
+  "message": "Articles processed successfully",
+  "data": {
+    "articles_processed": 70,
+    "similarity_matrix_shape": [70, 70],
+    "proof_size_bytes": 31656,
+    "output_directory": "./outputs/result_212156f8-1178-4883-bd8e-9598bb6212e4"
+  }
+}
+```
+
+### 1.1. Download Results
+
+After processing, download the generated files using the `request_id` from the response:
+
+```bash
+curl -X GET \
+  -H "X-API-Key: 35afbc42ff21e45908f6265f0c3725422489f027ffc6da473f628015bba64ff9" \
+  "https://rekt-recommender-api-132737210721.europe-west1.run.app/download/212156f8-1178-4883-bd8e-9598bb6212e4" \
+  --output results.zip
+```
+
+**What you get:**
+The download returns a ZIP file containing:
+- `similarity_matrix.json` - The computed similarities between all articles
+- `proof.bin` - STARK proof file for verification
+- `circuit_settings.bin` - Verification settings
+- `metadata.json` - Article metadata and processing information
+- `article_ids.json` - Mapping of article identifiers
+
+### 1.2. Complete Workflow Example
+
+Here's a complete example showing the full process:
+
+```bash
+# Step 1: Process articles
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: YOUR_API_KEY" \
+  --data-binary @content.json \
+  "https://rekt-recommender-api-132737210721.europe-west1.run.app/process"
+
+# Response will include a request_id like:
+# {
+#   "request_id": "212156f8-1178-4883-bd8e-9598bb6212e4",
+#   "status": "success",
+#   ...
+# }
+
+# Step 2: Download results using the request_id
+curl -X GET \
+  -H "X-API-Key: YOUR_API_KEY" \
+  "https://rekt-recommender-api-132737210721.europe-west1.run.app/download/212156f8-1178-4883-bd8e-9598bb6212e4" \
+  --output results.zip
+
+# Step 3: Extract and use the files
+unzip results.zip
+# Files available: similarity_matrix.json, proof.bin, circuit_settings.bin, metadata.json, article_ids.json
+```
 
 **Input Format:**
 The API now expects a JSON file in the following format:
@@ -61,6 +121,28 @@ The API now expects a JSON file in the following format:
   ]
 }
 ```
+
+### 1.3. Result Storage & Cleanup
+
+**Automatic Cleanup:**
+- Results are automatically cleaned up after **24 hours** by default
+- Cleanup runs every **60 minutes** in the background
+- Configurable via `RESULT_TTL_HOURS` environment variable
+
+**Manual Cleanup:**
+You can trigger immediate cleanup of old results:
+
+```bash
+curl -X POST \
+  -H "X-API-Key: YOUR_API_KEY" \
+  "https://rekt-recommender-api-132737210721.europe-west1.run.app/cleanup"
+```
+
+**Storage Configuration:**
+- `RESULT_TTL_HOURS`: How long to keep results (default: 24 hours)
+- `OUTPUT_DIR`: Directory where results are stored (default: ./outputs)
+
+**Input Format:**
 
 ### 2. Frontend Integration
 
