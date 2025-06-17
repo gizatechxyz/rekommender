@@ -17,26 +17,50 @@ The Rekt News Verifiable Recommender System provides cryptographic proof that ar
 
 ### 1. Article Processing & Proof Generation
 
-When the Rekt team adds new articles, they upload the updated article dataset to generate fresh similarity calculations and proofs:
+When the Rekt team adds new articles, they upload the updated article dataset (as JSON) to generate fresh similarity calculations and proofs:
 
 ```bash
 curl -X POST \
-  -H "Content-Type: application/zip" \
+  -H "Content-Type: application/json" \
   -H "X-API-Key: 3e6ededaaa438fa4cca129fc674cdde5e84d9275d6dd6068867ca06e0e732d1e" \
-  --data-binary @rekt_articles.zip \
-  "https://rekt-recommender-api-132737210721.europe-west1.run.app/process" \
-  --output result.zip
+  --data-binary @content.json \
+  "https://rekt-recommender-api-132737210721.europe-west1.run.app/process"
 ```
 
 **What happens:**
-- The API processes all articles and computes embeddings
-- Calculates cosine similarity matrix between all articles
+- The API processes the 70 most recent articles from the JSON input
+- Computes embeddings and calculates cosine similarity matrix between all articles
 - Generates a STARK proof of the similarity computation
-- Returns a zip file containing:
+- Returns a JSON response containing the output directory path with:
   - `similarity_matrix.json` - The computed similarities
   - `proof.bin` - STARK proof file
-  - `settings.bin` - Verification settings
+  - `circuit_settings.bin` - Verification settings
   - `metadata.json` - Article metadata and mapping
+
+**Input Format:**
+The API now expects a JSON file in the following format:
+
+```json
+{
+  "timestamp": 1749734388946,
+  "posts": [
+    {
+      "date": "6/9/2025",
+      "featured": true,
+      "title": "AlexLab - Rekt II",
+      "rekt": {
+        "amount": 16180000,
+        "audit": "Clarity Alliance, CoinFabrik",
+        "date": "6/6/2025"
+      },
+      "tags": ["AlexLab", "Rekt", "Defi"],
+      "excerpt": "Over $16 million drained...",
+      "banner": "https://...",
+      "slug": "alexlab-rekt2"
+    }
+  ]
+}
+```
 
 ### 2. Frontend Integration
 

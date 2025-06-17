@@ -1,6 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::fs;
-use std::path::Path;
 use std::time::Instant;
 
 use anyhow::{Context, Result};
@@ -14,27 +12,39 @@ use stop_words;
 const TAG_BOOST: usize = 5;
 const AUDITOR_BOOST: usize = 3;
 const MAX_DOC_PERCENTAGE: f32 = 0.80;
-const MAX_FILES: usize = 70;
 const MIN_DOC_THRESHOLD_UNIGRAM: usize = 5;
 const MIN_DOC_THRESHOLD_NGRAM: usize = 2;
 
-#[derive(Debug, Deserialize)]
-struct Frontmatter {
-    title: String,
-    tags: Option<Vec<String>>,
-    rekt: Option<RektDetails>,
-    excerpt: Option<String>,
+#[derive(Debug, Deserialize, Clone)]
+pub struct JsonArticle {
+    pub date: String,
+    #[allow(dead_code)]
+    pub featured: Option<bool>,
+    pub title: String,
+    pub rekt: Option<RektDetails>,
+    pub tags: Option<Vec<String>>,
+    pub excerpt: Option<String>,
+    #[allow(dead_code)]
+    pub banner: Option<String>,
+    pub slug: String,
 }
 
-#[derive(Debug, Deserialize)]
-struct RektDetails {
-    audit: Option<String>,
+#[derive(Debug, Deserialize, Clone)]
+pub struct RektDetails {
+    #[allow(dead_code)]
+    pub amount: Option<u64>,
+    pub audit: Option<String>,
+    #[allow(dead_code)]
+    pub date: Option<String>,
 }
 
 struct Document {
     id: String,
+    #[allow(dead_code)]
     title: String,
+    #[allow(dead_code)]
     tags: Vec<String>,
+    #[allow(dead_code)]
     auditor: Option<String>,
     term_freq: HashMap<String, usize>,
 }
@@ -116,14 +126,14 @@ impl RecommenderSystem {
         }
     }
 
-    pub fn load_and_process(
+    pub fn load_and_process_json(
         &mut self,
-        directory: &Path,
+        articles: &[JsonArticle],
     ) -> Result<(Vec<String>, Vec<u8>, Vec<u8>)> {
         let start_time = Instant::now();
 
-        // Load documents
-        self.load_documents(directory)?;
+        // Load documents from JSON articles
+        self.load_json_documents(articles)?;
 
         // Calculate everything
         self.calculate_idf_scores();
@@ -143,80 +153,37 @@ impl RecommenderSystem {
         ))
     }
 
-    fn load_documents(&mut self, directory: &Path) -> Result<()> {
-        let mut file_entries = Vec::new();
+    fn load_json_documents(&mut self, articles: &[JsonArticle]) -> Result<()> {
+        for article in articles {
+            let tags = article.tags.clone().unwrap_or_default();
+            let auditor = article.rekt.as_ref()
+                .and_then(|r| r.audit.clone())
+                .filter(|audit| !audit.is_empty() && audit.to_lowercase() != "n/a" && audit.to_lowercase() != "unaudited");
 
-        for entry in fs::read_dir(directory)? {
-            let entry = entry?;
-            let path = entry.path();
+            // Create content from title and excerpt
+            let content = if let Some(excerpt) = &article.excerpt {
+                format!("{} {}", article.title, excerpt)
+            } else {
+                article.title.clone()
+            };
 
-            if path.is_file() && path.extension().map_or(false, |ext| ext == "md") {
-                let metadata = fs::metadata(&path)?;
-                let modified_time = metadata
-                    .modified()
-                    .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-                file_entries.push((path, modified_time));
-            }
-        }
+            let term_freq = self.process_text(&content, &tags, &auditor, &article.excerpt);
 
-        file_entries.sort_by(|a, b| b.1.cmp(&a.1));
-
-        // Keep only the first
-        if file_entries.len() > MAX_FILES {
-            file_entries.truncate(MAX_FILES);
-        }
-
-        for (path, _) in file_entries {
-            let full_content = fs::read_to_string(&path)?;
-            let file_name_id = path.file_stem().unwrap().to_string_lossy().to_string();
-
-            let mut frontmatter_str = "";
-            let mut main_content_str = full_content.as_str();
-
-            if full_content.starts_with("---") {
-                if let Some(fm_content_end_offset) = full_content[3..].find("\n---") {
-                    let actual_fm_content_end = 3 + fm_content_end_offset;
-                    frontmatter_str = &full_content[..actual_fm_content_end];
-
-                    let content_start_offset = actual_fm_content_end + "\n---".len();
-                    if content_start_offset < full_content.len() {
-                        if full_content.as_bytes().get(content_start_offset) == Some(&b'\n') {
-                            main_content_str = &full_content[content_start_offset + 1..];
-                        } else {
-                            main_content_str = &full_content[content_start_offset..];
-                        }
-                    } else {
-                        main_content_str = "";
-                    }
-                }
-            }
-
-            let frontmatter: Frontmatter =
-                serde_yaml::from_str(frontmatter_str).unwrap_or_else(|_| Frontmatter {
-                    title: file_name_id.replace("-", " "),
-                    tags: None,
-                    rekt: None,
-                    excerpt: None,
-                });
-
-            let term_freq = self.process_text(
-                main_content_str,
-                &frontmatter.tags.clone().unwrap_or_default(),
-                &frontmatter.rekt.as_ref().and_then(|r| r.audit.clone()),
-                &frontmatter.excerpt.clone(),
-            );
-
-            self.documents.push(Document {
-                id: file_name_id,
-                title: frontmatter.title,
-                tags: frontmatter.tags.unwrap_or_default(),
-                auditor: frontmatter.rekt.and_then(|r| r.audit),
+            let document = Document {
+                id: article.slug.clone(),
+                title: article.title.clone(),
+                tags,
+                auditor,
                 term_freq,
-            });
+            };
+
+            self.documents.push(document);
         }
 
         Ok(())
     }
+
+
 
     fn clean_text(&self, text: &str) -> String {
         let text = self.url_pattern.replace_all(text, " ");

@@ -1,9 +1,8 @@
 #[macro_use]
 extern crate rocket;
 
-use std::fs::{self, File};
-use std::io::Write;
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use rocket::data::{Data, ToByteUnit};
@@ -12,13 +11,13 @@ use rocket::request::{FromRequest, Outcome, Request};
 use rocket::response::status::Custom;
 use rocket::serde::json::Json;
 use rocket::State;
-use serde::Serialize;
-use tempfile::TempDir;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use zip::write::FileOptions;
 
 mod recommender;
 use recommender::RecommenderSystem;
+
+const MAX_ARTICLES_PROCESSED: usize = 70;
 
 #[derive(Debug, Serialize)]
 struct ApiResponse {
@@ -34,6 +33,7 @@ struct ProcessingResult {
     articles_processed: usize,
     similarity_matrix_shape: (usize, usize),
     proof_size_bytes: usize,
+    output_directory: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -43,9 +43,17 @@ struct HealthResponse {
     version: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct ContentJson {
+    #[allow(dead_code)]
+    timestamp: Option<u64>,
+    posts: Vec<recommender::JsonArticle>,
+}
+
 struct AppState {
     max_upload_size: usize,
     api_key: String,
+    output_base_dir: PathBuf,
 }
 
 // API Key request guard
@@ -101,23 +109,23 @@ async fn process_articles(
     state: &State<AppState>,
     content_type: &ContentType,
     _api_key: ApiKey,
-) -> Result<(Status, Vec<u8>), Custom<Json<ApiResponse>>> {
+) -> Result<Json<ApiResponse>, Custom<Json<ApiResponse>>> {
     let request_id = Uuid::new_v4().to_string();
 
-    // Verify content type
-    if !content_type.is_zip() {
+    // Verify content type is JSON
+    if !content_type.is_json() {
         return Err(Custom(
             Status::BadRequest,
             Json(ApiResponse {
                 request_id,
                 status: "error".to_string(),
-                message: "Content-Type must be application/zip".to_string(),
+                message: "Content-Type must be application/json".to_string(),
                 data: None,
             }),
         ));
     }
 
-    // Read the uploaded data
+    // Read the uploaded JSON data
     let bytes = match data.open(state.max_upload_size.bytes()).into_bytes().await {
         Ok(bytes) => bytes,
         Err(_) => {
@@ -136,9 +144,21 @@ async fn process_articles(
         }
     };
 
-    // Process the zip file
-    match process_zip_file(&bytes.value, &request_id).await {
-        Ok(result_bytes) => Ok((Status::Ok, result_bytes)),
+    // Process the JSON file
+    match process_json_file(&bytes.value, &request_id, &state.output_base_dir).await {
+        Ok((articles_processed, similarity_matrix_shape, proof_size_bytes, output_dir)) => {
+            Ok(Json(ApiResponse {
+                request_id: request_id.clone(),
+                status: "success".to_string(),
+                message: "Articles processed successfully".to_string(),
+                data: Some(ProcessingResult {
+                    articles_processed,
+                    similarity_matrix_shape,
+                    proof_size_bytes,
+                    output_directory: output_dir,
+                }),
+            }))
+        }
         Err(e) => Err(Custom(
             Status::InternalServerError,
             Json(ApiResponse {
@@ -151,22 +171,44 @@ async fn process_articles(
     }
 }
 
-async fn process_zip_file(zip_bytes: &[u8], request_id: &str) -> Result<Vec<u8>> {
-    // Create temporary directories
-    let temp_dir = TempDir::new().context("Failed to create temp directory")?;
-    let input_dir = temp_dir.path().join("input");
-    let output_dir = temp_dir.path().join("output");
+async fn process_json_file(
+    json_bytes: &[u8],
+    request_id: &str,
+    output_base_dir: &Path,
+) -> Result<(usize, (usize, usize), usize, String)> {
+    // Parse JSON content
+    let content_json: ContentJson =
+        serde_json::from_slice(json_bytes).context("Failed to parse JSON content")?;
 
-    fs::create_dir(&input_dir).context("Failed to create input directory")?;
-    fs::create_dir(&output_dir).context("Failed to create output directory")?;
+    // Sort articles by date (most recent first) and take the first MAX_ARTICLES_PROCESSED
+    let mut articles = content_json.posts;
+    articles.sort_by(|a, b| {
+        // Parse dates for proper sorting - assuming MM/DD/YYYY format
+        let parse_date = |date_str: &str| -> Result<chrono::NaiveDate, chrono::ParseError> {
+            chrono::NaiveDate::parse_from_str(date_str, "%m/%d/%Y")
+        };
 
-    // Extract input zip
-    extract_zip(zip_bytes, &input_dir).context("Failed to extract input zip")?;
+        let date_a =
+            parse_date(&a.date).unwrap_or(chrono::NaiveDate::from_ymd_opt(1970, 1, 1).unwrap());
+        let date_b =
+            parse_date(&b.date).unwrap_or(chrono::NaiveDate::from_ymd_opt(1970, 1, 1).unwrap());
+
+        date_b.cmp(&date_a) // Most recent first
+    });
+
+    if articles.len() > MAX_ARTICLES_PROCESSED {
+        articles.truncate(MAX_ARTICLES_PROCESSED);
+    }
+
+    // Create output directory
+    let output_dir_name = format!("result_{}", request_id);
+    let output_dir = output_base_dir.join(&output_dir_name);
+    fs::create_dir_all(&output_dir).context("Failed to create output directory")?;
 
     // Process articles
     let mut recommender = RecommenderSystem::new();
     let (article_ids, proof_data, circuit_settings) = recommender
-        .load_and_process(&input_dir)
+        .load_and_process_json(&articles)
         .context("Failed to process articles")?;
 
     // Get similarity matrix
@@ -183,35 +225,17 @@ async fn process_zip_file(zip_bytes: &[u8], request_id: &str) -> Result<Vec<u8>>
     )
     .context("Failed to save outputs")?;
 
-    // Create output zip
-    create_output_zip(&output_dir).context("Failed to create output zip")
-}
+    let similarity_matrix_shape = (
+        similarity_matrix.len(),
+        similarity_matrix.get(0).map_or(0, |row| row.len()),
+    );
 
-fn extract_zip(zip_bytes: &[u8], output_dir: &Path) -> Result<()> {
-    use std::io::Cursor;
-    use zip::ZipArchive;
-
-    let cursor = Cursor::new(zip_bytes);
-    let mut archive = ZipArchive::new(cursor)?;
-
-    for i in 0..archive.len() {
-        let mut file = archive.by_index(i)?;
-        let outpath = output_dir.join(file.mangled_name());
-
-        if file.is_dir() {
-            fs::create_dir_all(&outpath)?;
-        } else {
-            if let Some(p) = outpath.parent() {
-                if !p.exists() {
-                    fs::create_dir_all(&p)?;
-                }
-            }
-            let mut outfile = File::create(&outpath)?;
-            std::io::copy(&mut file, &mut outfile)?;
-        }
-    }
-
-    Ok(())
+    Ok((
+        article_ids.len(),
+        similarity_matrix_shape,
+        proof_data.len(),
+        output_dir.to_string_lossy().to_string(),
+    ))
 }
 
 fn save_outputs(
@@ -236,7 +260,7 @@ fn save_outputs(
     let proof_path = output_dir.join("proof.bin");
     fs::write(&proof_path, proof_data)?;
 
-    // Save circuit circuit_settings as circuit_settings.bin
+    // Save circuit settings as circuit_settings.bin
     let settings_path = output_dir.join("circuit_settings.bin");
     fs::write(&settings_path, circuit_settings)?;
 
@@ -253,34 +277,6 @@ fn save_outputs(
     fs::write(&metadata_path, serde_json::to_string_pretty(&metadata)?)?;
 
     Ok(())
-}
-
-fn create_output_zip(output_dir: &Path) -> Result<Vec<u8>> {
-    use std::io::Cursor;
-    use zip::ZipWriter;
-
-    let mut buffer = Vec::new();
-    {
-        let cursor = Cursor::new(&mut buffer);
-        let mut zip = ZipWriter::new(cursor);
-        let options = FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
-
-        // Add all files from output directory
-        for entry in fs::read_dir(output_dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.is_file() {
-                let file_name = path.file_name().unwrap().to_string_lossy();
-                zip.start_file(file_name, options)?;
-                let contents = fs::read(&path)?;
-                zip.write_all(&contents)?;
-            }
-        }
-
-        zip.finish()?;
-    }
-
-    Ok(buffer)
 }
 
 #[catch(401)]
@@ -332,6 +328,15 @@ fn rocket() -> _ {
         panic!("API_KEY must be at least 16 characters long for security");
     }
 
+    let output_base_dir = std::env::var("OUTPUT_DIR")
+        .unwrap_or_else(|_| "./outputs".to_string())
+        .into();
+
+    // Create output base directory if it doesn't exist
+    if let Err(e) = fs::create_dir_all(&output_base_dir) {
+        panic!("Failed to create output base directory: {}", e);
+    }
+
     rocket::build()
         .configure(rocket::Config {
             port,
@@ -341,6 +346,7 @@ fn rocket() -> _ {
         .manage(AppState {
             max_upload_size,
             api_key,
+            output_base_dir,
         })
         .mount("/", routes![health, process_articles])
         .register("/", catchers![unauthorized, not_found, internal_error])
