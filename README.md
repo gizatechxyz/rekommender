@@ -1,494 +1,298 @@
-# Rekt News Verifiable Recommender System
+# REKT Recommender
 
-A cryptographically verifiable article recommendation system for Rekt News using STARK proofs. This system ensures that article recommendations are computed transparently and can be verified by users.
+A zk-based verifiable recommender system for recommending articles from Rekt News. It generates similarity matrices and provides cryptographic proofs to ensure the integrity of the computation. The current system is content-based, with plans underway to evolve into a hybrid recommender by incorporating collaborative filtering techniques.
 
-## 🔗 System Overview
+## Why Does This Matter?
+We believe no news site or social platform should control what you see behind the scenes. Our mission is to build a web where integrity and transparency come first.
 
-The Rekt News Verifiable Recommender System provides cryptographic proof that article recommendations are computed using cosine similarity on the actual article content, preventing manipulation or bias in the recommendation algorithm.
 
-### Key Features
 
-- **Verifiable Recommendations**: All recommendations come with STARK proofs
-- **Transparent Algorithm**: Uses cosine similarity on article embeddings
-- **Zero-Knowledge**: Users can verify recommendations without seeing the underlying computation
-- **Frontend Integration**: Easy-to-integrate TypeScript functions and React components
+## 🏗️ Architecture
 
-## 📋 System Flow
+### System Components
 
-### 1. Article Processing & Proof Generation
-
-When the Rekt team adds new articles, they upload the updated article dataset (as JSON) to generate fresh similarity calculations and proofs:
-
-```bash
-curl -X POST \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: 35afbc42ff21e45908f6265f0c3725422489f027ffc6da473f628015bba64ff9" \
-  --data-binary @content.json \
-  "https://rekt-recommender-api-132737210721.europe-west1.run.app/process"
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   API Layer     │    │  Text Processor │    │  ZK Proof Gen   │
+│                 │    │                 │    │                 │
+│ • Authentication│────│ • Cleaning      │────│ • LuminAIR      │
+│ • Request Route │    │ • Stemming      │    │ • Verification  │
+│ • Error Handle  │    │ • N-gram Gen    │    │ • Serialization │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+         │                       │                       │
+         └───────────────────────┼───────────────────────┘
+                                 │
+                  ┌─────────────────┐
+                  │ Similarity Calc │
+                  │                 │
+                  │ • TF-IDF Matrix │
+                  │ • Cosine Sim    │
+                  │ • Result Export │
+                  └─────────────────┘
 ```
 
-**What happens:**
-- The API processes the 70 most recent articles from the JSON input
-- Computes embeddings and calculates cosine similarity matrix between all articles
-- Generates a STARK proof of the similarity computation
-- Returns a JSON response with processing details and a `request_id`
+### Processing Pipeline
 
-**Response Format:**
+1. **Input Validation**: JSON structure validation and content type verification
+2. **Text Preprocessing**: 
+   - URL and crypto address removal
+   - Markdown syntax cleaning
+   - Stop word filtering
+   - Word stemming and normalization
+3. **Feature Extraction**:
+   - Term frequency calculation
+   - N-gram generation (bigrams and trigrams)
+   - Tag and auditor boosting
+4. **TF-IDF Computation**:
+   - Inverse document frequency calculation
+   - Term filtering by document frequency
+   - Matrix construction
+5. **Similarity Analysis** (Verifiable):
+   - Vector normalization
+   - Cosine similarity computation
+   - Zero-knowledge proof generation
+6. **Result Storage**:
+   - Matrix serialization
+   - Proof data export
+   - Metadata generation
+
+## 📡 API Endpoints
+
+### Health Check
+```http
+GET /health
+```
+
+**Response:**
 ```json
 {
-  "request_id": "212156f8-1178-4883-bd8e-9598bb6212e4",
-  "status": "success",
-  "message": "Articles processed successfully",
-  "data": {
-    "articles_processed": 70,
-    "similarity_matrix_shape": [70, 70],
-    "proof_size_bytes": 31656,
-    "output_directory": "./outputs/result_212156f8-1178-4883-bd8e-9598bb6212e4"
-  }
+  "status": "healthy",
+  "service": "rekt-recommender-api",
+  "version": "0.1.3"
 }
 ```
 
-### 1.1. Download Results
-
-After processing, download the generated files using the `request_id` from the response:
-
-```bash
-curl -X GET \
-  -H "X-API-Key: 35afbc42ff21e45908f6265f0c3725422489f027ffc6da473f628015bba64ff9" \
-  "https://rekt-recommender-api-132737210721.europe-west1.run.app/download/212156f8-1178-4883-bd8e-9598bb6212e4" \
-  --output results.zip
+### Process Articles
+```http
+POST /process
+Content-Type: application/json
+X-API-Key: your-api-key
 ```
 
-**What you get:**
-The download returns a ZIP file containing:
-- `similarity_matrix.json` - The computed similarities between all articles
-- `proof.bin` - STARK proof file for verification
-- `circuit_settings.bin` - Verification settings
-- `metadata.json` - Article metadata and processing information
-- `article_ids.json` - Mapping of article identifiers
-
-### 1.2. Complete Workflow Example
-
-Here's a complete example showing the full process:
-
-```bash
-# Step 1: Process articles
-curl -X POST \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: YOUR_API_KEY" \
-  --data-binary @content.json \
-  "https://rekt-recommender-api-132737210721.europe-west1.run.app/process"
-
-# Response will include a request_id like:
-# {
-#   "request_id": "212156f8-1178-4883-bd8e-9598bb6212e4",
-#   "status": "success",
-#   ...
-# }
-
-# Step 2: Download results using the request_id
-curl -X GET \
-  -H "X-API-Key: YOUR_API_KEY" \
-  "https://rekt-recommender-api-132737210721.europe-west1.run.app/download/212156f8-1178-4883-bd8e-9598bb6212e4" \
-  --output results.zip
-
-# Step 3: Extract and use the files
-unzip results.zip
-# Files available: similarity_matrix.json, proof.bin, circuit_settings.bin, metadata.json, article_ids.json
-```
-
-**Input Format:**
-The API now expects a JSON file in the following format:
-
+**Request Body:**
 ```json
 {
-  "timestamp": 1749734388946,
+  "timestamp": 1640995200,
   "posts": [
     {
-      "date": "6/9/2025",
-      "featured": true,
-      "title": "AlexLab - Rekt II",
+      "date": "12/31/2023",
+      "title": "DeFi Protocol Exploit Analysis",
+      "excerpt": "Detailed analysis of the recent exploit...",
+      "slug": "defi-protocol-exploit-analysis",
+      "tags": ["DeFi", "Security", "Analysis"],
       "rekt": {
-        "amount": 16180000,
-        "audit": "Clarity Alliance, CoinFabrik",
-        "date": "6/6/2025"
-      },
-      "tags": ["AlexLab", "Rekt", "Defi"],
-      "excerpt": "Over $16 million drained...",
-      "banner": "https://...",
-      "slug": "alexlab-rekt2"
+        "amount": 50000000,
+        "audit": "Trail of Bits",
+        "date": "12/30/2023"
+      }
     }
   ]
 }
 ```
 
-### 1.3. Result Storage & Cleanup
-
-**Automatic Cleanup:**
-- Results are automatically cleaned up after **24 hours** by default
-- Cleanup runs every **60 minutes** in the background
-- Configurable via `RESULT_TTL_HOURS` environment variable
-
-**Manual Cleanup:**
-You can trigger immediate cleanup of old results:
-
-```bash
-curl -X POST \
-  -H "X-API-Key: YOUR_API_KEY" \
-  "https://rekt-recommender-api-132737210721.europe-west1.run.app/cleanup"
-```
-
-**Storage Configuration:**
-- `RESULT_TTL_HOURS`: How long to keep results (default: 24 hours)
-- `OUTPUT_DIR`: Directory where results are stored (default: ./outputs)
-
-**Input Format:**
-
-### 2. Frontend Integration
-
-The Rekt team integrates the recommendation system into their website using the provided TypeScript functions.
-
-### 3. User Verification
-
-Readers can verify that recommendations are legitimate using the embedded verification component.
-
-## 🔧 Implementation
-
-### TypeScript Recommendation Function
-
-Add this TypeScript implementation to your frontend codebase:
-
-```typescript
-// types/recommender.ts
-export interface Article {
-  id: string;
-  title: string;
-  url: string;
-  publishDate: string;
-  tags?: string[];
-  excerpt?: string;
-}
-
-export interface SimilarityData {
-  similarities: Record<string, Record<string, number>>;
-  articles: Record<string, Article>;
-  metadata: {
-    lastUpdated: string;
-    totalArticles: number;
-    proofGenerated: string;
-  };
-}
-
-export interface Recommendation {
-  article: Article;
-  similarity: number;
-  rank: number;
-}
-
-// utils/recommender.ts
-import { Article, SimilarityData, Recommendation } from '../types/recommender';
-
-/**
- * Fetches the latest similarity data from your storage
- */
-async function loadSimilarityData(): Promise<SimilarityData> {
-  try {
-    // Replace with the actual storage URL or path
-    const response = await fetch('/data/similarity_matrix.json');
-    if (!response.ok) {
-      throw new Error(`Failed to load similarity data: ${response.status}`);
-    }
-    return await response.json();
-  } catch (error) {
-    console.error('Error loading similarity data:', error);
-    throw new Error('Failed to load recommendation data');
-  }
-}
-
-/**
- * Gets top 3 article recommendations based on cosine similarity
- * @param currentArticleId - The ID of the current article being read
- * @param excludeIds - Optional array of article IDs to exclude from recommendations
- * @returns Promise<Recommendation[]> - Array of 3 recommended articles
- */
-export async function getRecommendations(
-  currentArticleId: string,
-  excludeIds: string[] = []
-): Promise<Recommendation[]> {
-  try {
-    const data = await loadSimilarityData();
-    
-    // Get similarities for the current article
-    const currentArticleSimilarities = data.similarities[currentArticleId];
-    
-    if (!currentArticleSimilarities) {
-      console.warn(`No similarities found for article ${currentArticleId}`);
-      return [];
-    }
-
-    // Convert to array of [articleId, similarity] and sort by similarity
-    const sortedSimilarities = Object.entries(currentArticleSimilarities)
-      .filter(([articleId]) => {
-        // Exclude the current article and any specified exclusions
-        return articleId !== currentArticleId && !excludeIds.includes(articleId);
-      })
-      .filter(([articleId]) => {
-        // Ensure the article exists in our metadata
-        return data.articles[articleId];
-      })
-      .sort(([, a], [, b]) => b - a) // Sort by similarity (descending)
-      .slice(0, 3); // Take top 3
-
-    // Map to recommendation objects
-    const recommendations: Recommendation[] = sortedSimilarities.map(
-      ([articleId, similarity], index) => ({
-        article: data.articles[articleId],
-        similarity,
-        rank: index + 1,
-      })
-    );
-
-    return recommendations;
-  } catch (error) {
-    console.error('Error getting recommendations:', error);
-    return [];
+**Response:**
+```json
+{
+  "request_id": "123e4567-e89b-12d3-a456-426614174000",
+  "status": "success",
+  "message": "Articles processed successfully",
+  "data": {
+    "articles_processed": 45,
+    "similarity_matrix_shape": [45, 45],
+    "proof_size_bytes": 2048,
+    "output_directory": "./outputs/result_123e4567-e89b-12d3-a456-426614174000"
   }
 }
 ```
 
-### React Component Integration
-
-Install the LuminAIR React package and integrate the verification component:
-
-```bash
-npm install @gizatech/luminair-react
+### Download Results
+```http
+GET /download/{request_id}
+X-API-Key: your-api-key
 ```
 
-```tsx
-// components/ArticleRecommendations.tsx
-import React, { useEffect, useState } from 'react';
-import { VerifyButton } from '@gizatech/luminair-react';
-import '@gizatech/luminair-react/styles.css';
-import { getRecommendations, Recommendation } from '../utils/recommender';
+**Response:** ZIP file containing:
+- `article_ids.json` - List of processed article identifiers
+- `similarity_matrix.json` - Computed similarity matrix
+- `proof.bin` - Zero-knowledge proof data
+- `circuit_settings.bin` - Proof verification settings
+- `metadata.json` - Processing metadata and statistics
 
-interface ArticleRecommendationsProps {
-  currentArticleId: string;
-  className?: string;
-}
+### Manual Cleanup
+```http
+POST /cleanup
+X-API-Key: your-api-key
+```
 
-export function ArticleRecommendations({ 
-  currentArticleId, 
-  className = '' 
-}: ArticleRecommendationsProps) {
-  const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    async function loadRecommendations() {
-      try {
-        setLoading(true);
-        setError(null);
-        const recs = await getRecommendations(currentArticleId);
-        setRecommendations(recs);
-      } catch (err) {
-        setError('Failed to load recommendations');
-        console.error('Error loading recommendations:', err);
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    loadRecommendations();
-  }, [currentArticleId]);
-
-  if (loading) {
-    return (
-      <div className={`${className} animate-pulse`}>
-        <div className="h-4 bg-gray-200 rounded w-1/3 mb-4"></div>
-        <div className="space-y-3">
-          {[1, 2, 3].map(i => (
-            <div key={i} className="h-12 bg-gray-200 rounded"></div>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  if (error || recommendations.length === 0) {
-    return (
-      <div className={className}>
-        <p className="text-gray-500">
-          {error || 'No recommendations available at this time.'}
-        </p>
-      </div>
-    );
-  }
-
-  return (
-    <div className={className}>
-      <div className="flex items-center justify-between mb-6">
-        <h3 className="text-xl font-bold text-gray-900">
-          Recommended Reading
-        </h3>
-        <VerifyButton
-          proofPath="/data/proof.bin"
-          settingsPath="/data/settings.bin"
-          title="Verify Recommendations"
-          buttonText="🔒 Verify"
-          author="Rekt News"
-          modelDescription="Cosine Similarity Recommender"
-          authorUrl="https://rekt.news"
-          className="text-sm bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded"
-        />
-      </div>
-
-      <div className="space-y-4">
-        {recommendations.map((rec) => (
-          <article 
-            key={rec.article.id}
-            className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow"
-          >
-            <div className="flex items-start justify-between">
-              <div className="flex-1">
-                <h4 className="font-semibold text-gray-900 hover:text-red-600 transition-colors">
-                  <a href={rec.article.url} className="text-decoration-none">
-                    {rec.article.title}
-                  </a>
-                </h4>
-                {rec.article.excerpt && (
-                  <p className="text-gray-600 text-sm mt-1 line-clamp-2">
-                    {rec.article.excerpt}
-                  </p>
-                )}
-                <div className="flex items-center mt-2 text-xs text-gray-500">
-                  <span>{new Date(rec.article.publishDate).toLocaleDateString()}</span>
-                  {rec.article.tags && rec.article.tags.length > 0 && (
-                    <>
-                      <span className="mx-2">•</span>
-                      <span>{rec.article.tags.slice(0, 2).join(', ')}</span>
-                    </>
-                  )}
-                </div>
-              </div>
-              <div className="ml-4 text-right">
-                <div className="text-xs font-mono text-gray-400">
-                  #{rec.rank}
-                </div>
-                <div className="text-xs text-gray-500">
-                  {(rec.similarity * 100).toFixed(1)}% similar
-                </div>
-              </div>
-            </div>
-          </article>
-        ))}
-      </div>
-
-      <div className="mt-4 text-xs text-gray-400 text-center">
-        Recommendations are cryptographically verifiable and computed using cosine similarity
-      </div>
-    </div>
-  );
+**Response:**
+```json
+{
+  "request_id": "123e4567-e89b-12d3-a456-426614174000",
+  "status": "success",
+  "message": "Manual cleanup completed. Removed directories older than 24 hours."
 }
 ```
 
-### Usage in Article Pages
+## 🔧 Configuration
 
-```tsx
-// pages/article/[slug].tsx or components/ArticlePage.tsx
-import { ArticleRecommendations } from '../components/ArticleRecommendations';
+### Environment Variables
 
-export function ArticlePage({ article }: { article: Article }) {
-  return (
-    <div className="max-w-4xl mx-auto px-4 py-8">
-      {/* Your article content */}
-      <article>
-        <h1>{article.title}</h1>
-        <div dangerouslySetInnerHTML={{ __html: article.content }} />
-      </article>
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `PORT` | Server port | `8080` | No |
+| `MAX_UPLOAD_SIZE_MB` | Maximum upload size in MB | `100` | No |
+| `API_KEY` | Authentication key (min 16 chars) | - | **Yes** |
+| `OUTPUT_DIR` | Results storage directory | `./outputs` | No |
+| `RESULT_TTL_HOURS` | Result retention time in hours | `24` | No |
 
-      {/* Recommendations section */}
-      <div className="mt-12 border-t pt-8">
-        <ArticleRecommendations 
-          currentArticleId={article.id}
-          className="max-w-2xl"
-        />
-      </div>
-    </div>
-  );
-}
-```
+### Text Processing Configuration
 
-## 🚀 Deployment Setup
+The system uses configurable parameters for text processing:
 
-### 1. Configure Build System
+- **Tag Boost**: `5x` - Multiplier for tag term importance
+- **Auditor Boost**: `3x` - Multiplier for auditor term importance
+- **Max Document Percentage**: `80%` - Maximum document frequency for terms
+- **Min Document Thresholds**: 
+  - Unigrams: `5` documents minimum
+  - N-grams: `2` documents minimum
 
-For **Next.js** projects, update your `next.config.js`:
+## 🚀 Quick Start
 
-```javascript
-/** @type {import('next').NextConfig} */
-const nextConfig = {
-  webpack: (config, { isServer }) => {
-    // Handle WASM files for proof verification
-    config.experiments = {
-      ...config.experiments,
-      asyncWebAssembly: true,
-    };
+### Prerequisites
+- Rust 1.70+ with Cargo
+- Git
 
-    config.module.rules.push({
-      test: /\.wasm$/,
-      type: 'webassembly/async',
-    });
+### Installation
 
-    // Fallback for Node.js modules
-    if (!isServer) {
-      config.resolve.fallback = {
-        ...config.resolve.fallback,
-        fs: false,
-        path: false,
-        crypto: false,
-      };
-    }
-
-    return config;
-  },
-};
-
-module.exports = nextConfig;
-```
-
-### 2. Setup File Storage
-
-Store the generated files from the API in your public directory or CDN:
-
-```
-public/
-├── data/
-│   ├── similarity_matrix.json
-│   ├── proof.bin
-│   ├── settings.bin
-│   └── metadata.json
-```
-
-### 3. Update Workflow
-
-1. **When adding new articles:**
+1. **Clone the repository:**
    ```bash
-   # Create zip with all articles
-   zip -r rekt_articles.zip articles/
-   
-   # Upload to API
-   curl -X POST \
-     -H "Content-Type: application/zip" \
-     -H "X-API-Key: YOUR_API_KEY" \
-     --data-binary @rekt_articles.zip \
-     "https://rekt-recommender-api-132737210721.europe-west1.run.app/process" \
-     --output result.zip
-   
-   # Extract and deploy to your static hosting
-   unzip result.zip -d public/data/
+   git clone <repository-url>
+   cd rekt-recommender-api
    ```
 
-2. **Deploy updated files** to your CDN/static hosting
+2. **Set up environment variables:**
+   ```bash
+   export API_KEY="your-secure-api-key-here-min-16-chars"
+   export PORT=8080
+   export OUTPUT_DIR="./outputs"
+   export RESULT_TTL_HOURS=24
+   ```
 
-3. **The frontend automatically** picks up the new recommendations
+3. **Build and run:**
+   ```bash
+   # Development
+   cargo run
+   
+   # Production
+   cargo build --release
+   ./target/release/rekt-recommender-api
+   ```
+
+### Docker Deployment
+
+1. **Build the image:**
+   ```bash
+   docker build -t rekt-recommender .
+   ```
+
+2. **Run the container:**
+   ```bash
+   docker run -d \
+     -p 8080:8080 \
+     -e API_KEY="your-secure-api-key" \
+     -e OUTPUT_DIR="/app/outputs" \
+     -v $(pwd)/outputs:/app/outputs \
+     rekt-recommender
+   ```
+
+### Google Cloud Build
+
+The project includes a `cloudbuild.yaml` configuration for automated deployment to Google Cloud:
+
+```bash
+gcloud builds submit --config cloudbuild.yaml .
+```
+
+## 🧪 Usage Examples
+
+### Basic Article Processing
+
+```bash
+# Process articles from JSON file
+curl -X POST http://localhost:8080/process \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: your-api-key" \
+  -d @articles.json
+```
+
+### Download Results
+
+```bash
+# Download processing results
+curl -X GET http://localhost:8080/download/123e4567-e89b-12d3-a456-426614174000 \
+  -H "X-API-Key: your-api-key" \
+  -o results.zip
+```
+
+### Health Check
+
+```bash
+# Check service health
+curl http://localhost:8080/health
+```
+
+## 🏗️ Development
+
+### Project Structure
+
+```
+src/
+├── main.rs                 # Application entry point and server setup
+├── api.rs                  # HTTP handlers and authentication
+├── config.rs               # Configuration management
+├── types.rs                # Data structures and serialization
+├── utils.rs                # Utility functions for file operations
+└── recommender/
+    ├── mod.rs              # Main recommender system logic
+    └── text_processing.rs  # Natural language processing
+```
+
+### Key Components
+
+- **RecommenderSystem**: Main orchestrator for the processing pipeline
+- **TextProcessor**: Handles all text cleaning and feature extraction
+- **ApiKey**: Request guard for authentication
+- **CleanupFairing**: Background task manager for result cleanup
+
+### Building from Source
+
+```bash
+# Install dependencies
+cargo build
+
+# Run tests
+cargo test
+
+# Check for linting issues
+cargo clippy
+
+# Format code
+cargo fmt
+```
+
+## 🔗 Links
+
+- [LuminAIR zkML Framework](https://github.com/gizatechxyz/LuminAIR)
+- [REKT News](https://rekt.news/)
+
+---
